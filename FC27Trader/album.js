@@ -78,10 +78,15 @@
   const costOf = (q) => (q.status === 'listed' ? q.price - netOf(q.sell || q.price) : q.price);
   const tolOf = (cfg) => (cfg.toleranceAuto ? DEFAULT_TOLERANCE : cfg.tolerance);
   const sellFor = (p, cfg) => (cfg.afterBuy === 'keep' ? 0 : cfg.afterBuy === 'markup' ? markupPrice(p, cfg.markupPct) : roundPrice(p));
+  // Revente d'une carte Galerie (achat direct, sniper Galerie, relist) : prix du marché (un palier sous la moins chère) si l'achat est en dessous,
+  // sinon prix d'achat (ou marge) ; 0 = gardée au club. Crédits récupérés au plus vite pour acheter les cartes suivantes
+  const resaleFor = (p, market, cfg) => (cfg.afterBuy === 'keep' ? 0 : Math.max(sellFor(p, cfg), roundPrice(Number(market) || 0)));
   const isOpen = (q) => q.status === 'pending' || q.status === 'searching';
   const isUnsold = (b) => b.state === 'expired' || b.state === 'unlisted';
+  // Tâches reprises seules après une pause anti-captcha (la lecture des joueurs de la vue Galerie se relance à la main)
+  const RESUMABLE = new Set(['buy', 'check']);
   const EMPTY_TOTAL = { bought: 0, spent: 0, sold: 0, received: 0, tax: 0, lost: 0, kept: 0, keptSpent: 0 };
-  Object.assign(X, { isDone, isFailed, isOpen, isUnsold, tolOf, netOf, step: X.step });
+  Object.assign(X, { isDone, isFailed, isOpen, isUnsold, tolOf, netOf, step: X.step, galleryResale: resaleFor });
 
   X.Album = class {
     mode = null; // 'buy' | 'check' | null
@@ -467,15 +472,31 @@
 
     // Carte snipée : comptée pour la Galerie si elle manquait ; true si c'était une carte manquante
     onSnipe(defId, raw) {
+      // Manquante avant ce snipe ? (lu avant l'ajout à la collection, sinon toujours « déjà collectée »)
+      const p = this.findPlayer(defId);
+      const missing = !!p && !this.refreshCollected(p).collected;
       // Toute carte snipée passe au club : comptée dans la collection Galerie
       this.addOwned(defId, X.attrsFrom(raw));
       this.saveColl();
-      const p = this.findPlayer(defId);
-      if (!p || this.refreshCollected(p).collected) return false;
+      if (!missing) return false;
       this.markCollected(defId);
       this.setSelected(defId, false);
       this.log(`${p.name} obtenu par snipe pour la Galerie`, 'buy');
       return true;
+    }
+    // Carte du sniper Galerie (lot) : coût suivi comme un achat direct Galerie (revente au prix du marché, jamais sous le prix payé)
+    onGallerySnipe(id, defId, name, price, sell, kept, listed) {
+      this.addTotal('bought', 1);
+      this.addTotal('spent', price);
+      if (kept) {
+        this.addTotal('kept', 1);
+        this.addTotal('keptSpent', price);
+      } else if (id) {
+        // Mise en vente échouée : suivie comme invendue, « Relister » ne descend jamais sous le prix payé
+        this.bought[id] = { price, sell: sell || price, defId, name, state: listed ? 'active' : 'unlisted', at: Date.now() };
+        this.saveBought();
+      }
+      this.touch();
     }
     // Vente d'une carte achetée pour la Galerie : décomptée ici (le sniper l'affiche dans les ventes)
     recordSold(i) {
@@ -548,7 +569,7 @@
     }
     // Captcha ou limite EA : pause courte commune, reprise automatique de la tâche ensuite
     lockout(msg) {
-      const mode = this.mode;
+      const mode = RESUMABLE.has(this.mode) ? this.mode : null;
       this.stopRequested = true;
       this.wake?.();
       const ms = this.guard.lockPause();
@@ -603,7 +624,7 @@
         const g = [this.guard.check(), bidToo ? this.guard.checkBid() : { ok: true }].find((x) => !x.ok);
         if (!g) return true;
         if (g.locked) {
-          const mode = this.mode;
+          const mode = RESUMABLE.has(this.mode) ? this.mode : null;
           this.stopRequested = true;
           this.log(`${g.reason} : reprise automatique à la fin`);
           if (mode) {
@@ -626,9 +647,11 @@
       const g = this.guard.check();
       if (g.locked) {
         this.mode = null;
-        save(K_LOCK_RESUME, { mode });
-        this.scheduleResume();
-        this.log(`${g.reason} : démarrage automatique à la fin`);
+        if (RESUMABLE.has(mode)) {
+          save(K_LOCK_RESUME, { mode });
+          this.scheduleResume();
+        }
+        this.log(`${g.reason}${RESUMABLE.has(mode) ? ' : démarrage automatique à la fin' : ''}`);
         this.ctx.afterTask();
         return false;
       }
@@ -934,6 +957,8 @@
             }
             return this.stopRequested ? undefined : this.giveUp(e, 'nocoins', `crédits insuffisants pour ${fmtNum(it.buyNow)} (${fmtNum(X.coins())} disponibles)`);
           }
+          // Prix du marché après cet achat : un palier sous l'annonce suivante (revente Galerie jamais sous le prix payé)
+          e.market = X.priceDown(r.items.find((x) => x !== it && x.buyNow >= it.buyNow)?.buyNow || 0);
           const res = await this.buyAndList(it, e);
           if (res === 'stop' || res === 'ok') return;
           fails++;
@@ -1016,7 +1041,7 @@
         await keep(keepMode ? '' : 'liste de transferts pleine');
         return 'ok';
       }
-      const l = await X.listClamped(it.raw, sellFor(price, cfg));
+      const l = await X.listClamped(it.raw, resaleFor(price, e.market, cfg));
       if (!l.success) {
         if (this.fatal(l, 'list')) return 'stop';
         await keep(`mise en vente échouée (statut ${l.status})${errText(l.error)}`);

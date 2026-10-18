@@ -126,6 +126,54 @@
     'firstOwner.usePercent': 'Supposer %',
     'firstOwner.mode': 'Premier propriétaire',
     noSearch: 'Recherche indisponible',
+    'max.line': 'Max {grade} · {credits} crédits · taxe {tax}',
+    'max.lineKeep': 'Max {grade} · {credits} crédits (gardées au club)',
+    'max.reached': 'Max {grade} atteint',
+    'max.none': 'Aucun grade atteignable avec les cartes au prix connu',
+    'max.unsynced': 'Rang max : synchroniser le set',
+    'max.hint': '{buys} carte(s) à acheter pour le grade {grade}, la composition la moins chère. Crédits nécessaires : total des achats (avancés avant revente). Taxe : 5 % EA à la revente, coût réel pour la Galerie.{unpriced}',
+    'max.hintUnpriced': ' {n} carte(s) sans prix non prises en compte.',
+    'max.best': ' Avec toutes les cartes sorties : {grade}.',
+    'ov.max': 'Rang max par set',
+    'ov.maxNote': 'Grade le plus haut atteignable avec tes cartes collectées et les cartes au prix connu, au moindre coût. Crédits à avancer et taxe EA de 5 % payée à la revente. Touche un set pour l’ouvrir avec cette composition.',
+    'ov.maxRow': 'Max {grade}{cur}, {buys} à acheter',
+    'ov.maxCur': ' (actuel {grade})',
+    'ov.maxSide': '{credits} · taxe {tax}',
+    'ov.maxSideKeep': '{credits} (club)',
+    'ov.maxEmpty': 'Synchronise tout pour voir le rang max de chaque set.',
+    'ov.toMax': 'Tout au max',
+    'ov.toMaxValue': 'taxe {tax}',
+    'ov.toMaxHint': '{sets} set(s) : {credits} crédits à avancer (récupérés à la revente), taxe EA {tax} crédits. Un joueur commun à plusieurs sets est compté dans chacun.',
+    'panel.credits': 'Crédits nécessaires',
+    'panel.tax': 'Taxe (revente)',
+    'panel.keep': 'Coût (gardées au club)',
+    'panel.max': 'Rang max',
+    'panel.maxValue': '{grade} · {credits} cr · taxe {tax}',
+    'panel.maxValueKeep': '{grade} · {credits} cr',
+    'snipe.running': '🎯 Sniper Galerie en cours (voir)',
+    'snipe.none': 'Aucune carte à sniper : toutes déjà dans la Galerie.',
+    'snipe.title': 'Sniper Galerie · {name}',
+    'snipe.sub': 'But : remplir la Galerie au moindre coût en récupérant vite les crédits. Achat jusqu’à un palier sous la moins chère du marché, une carte par joueur, puis revente 1 h au prix du marché (même palier), jamais sous le prix d’achat : coût d’une carte au plus = taxe EA de 5 %, gain si achetée en dessous. « Après achat » de la Galerie respecté (marge, ou club). Invendus remis en vente au prix du marché pendant les pauses. Les cartes alternent ; une carte obtenue est retirée du lot. Tes cibles habituelles ne sont pas touchées et reprennent à la fin si le sniper tournait.',
+    'snipe.starting': 'Démarrage…',
+    'snipe.suspended': 'Suspendu pendant une tâche Galerie (achats, lecture des joueurs), reprise ensuite',
+    'snipe.locked': 'Pause anti-captcha, reprise automatique',
+    'snipe.done': 'Terminé : {n} / {total} carte(s) obtenue(s)',
+    'snipe.target': 'Cible : {name}',
+    'snipe.prices': ' · achat ≤ {buy} · revente {sell}',
+    'snipe.pricesKeep': ' · achat ≤ {buy} · gardée au club',
+    'snipe.stats': '{snipes} obtenue(s) · {spent} crédits dépensés · {net}',
+    'snipe.cost': 'coût net estimé {n} crédits',
+    'snipe.gain': 'gain net estimé {n} crédits',
+    'snipe.rowTarget': 'Ciblée',
+    'snipe.rowWait': 'En attente',
+    'snipe.rowGot': 'Obtenue',
+    'snipe.rowOut': 'Retirée',
+    'snipe.sniped': 'snipée à {price}',
+    'snipe.listed': ' · en vente à {price}',
+    'snipe.kept': ' · gardée au club',
+    'snipe.stop': 'Arrêter le sniper Galerie',
+    'snipe.close': 'Fermer',
+    'snipe.closeHint': 'Le sniper Galerie continue en arrière-plan (bandeau du panneau FC27 Trader).',
   };
   const t = (k, vars) => {
     let s = STR[k] ?? k;
@@ -684,15 +732,36 @@
       reachable: true,
     };
   }
+  // Coût réel d'une carte achetée pour la Galerie : taxe EA à la revente (règle « Après achat »), prix entier si gardée au club
+  const taxOf = (price) => {
+    const cfg = X.app?.cfg ?? {};
+    if (!(price > 0)) return 0;
+    if (cfg.afterBuy === 'keep') return price;
+    return Math.max(0, price - X.net(X.galleryResale ? X.galleryResale(price, 0, cfg) || price : price));
+  };
+  const keepMode = () => X.app?.cfg?.afterBuy === 'keep';
+  // Rang max atteignable avec les cartes collectées et les cartes au prix connu : composition la moins chère, crédits à avancer, taxe
+  function maxPlan(set, pool, priceOfFn) {
+    const ladder = gradeFor(set, 0)?.ladder ?? [];
+    if (!ladder.length) return null;
+    const fill = gradeFill(pool, set, priceOfFn, ladder[ladder.length - 1].grade);
+    const unpriced = (Array.isArray(pool) ? pool : []).filter((e) => e && !e.isCollected && !priceOfFn(e)).length;
+    if (!fill || !fill.target) return { grade: null, credits: 0, tax: 0, buys: 0, unpriced };
+    const buys = fill.items.filter((e) => e && !e.isCollected);
+    const credits = buys.reduce((t, e) => t + priceOfFn(e), 0);
+    return { grade: fill.target, credits, tax: buys.reduce((t, e) => t + taxOf(priceOfFn(e)), 0), buys: buys.length, unpriced };
+  }
   function summariseSet(set, pool, partial, priceOfFn) {
     const owned = (Array.isArray(pool) ? pool : []).filter((e) => e && e.isCollected);
     const line = bestLineup(owned, set.required);
     const score = scoreDetail(line).total;
     const g = gradeFor(set, score);
     let next;
+    let max;
     if (typeof priceOfFn === 'function')
       try {
         next = nextTokens(set, pool, priceOfFn, g);
+        max = maxPlan(set, pool, priceOfFn);
       } catch {
         next = undefined;
       }
@@ -704,7 +773,7 @@
     } catch {
       best = undefined;
     }
-    return { ...(next !== undefined ? { next } : {}), collected: line.length, required: set.required, score, grade: (g && g.grade) || null, tokens: g ? g.tokens : 0, partial: !!partial, best, at: Date.now() };
+    return { ...(next !== undefined ? { next } : {}), ...(max ? { max } : {}), collected: line.length, required: set.required, score, grade: (g && g.grade) || null, tokens: g ? g.tokens : 0, partial: !!partial, best, at: Date.now() };
   }
   function overview(sets, progress) {
     let synced = 0;
@@ -715,6 +784,8 @@
     const nextList = [];
     const closest = [];
     const sPossible = [];
+    const maxList = [];
+    const toMax = { credits: 0, tax: 0, sets: 0 };
     for (const s of sets) {
       const g = gradeFor(s, 0);
       tokensTotal += g ? g.maxTokens : 0;
@@ -726,6 +797,13 @@
         if (p.partial) partial = true;
         const n = p.next;
         if (n && n.reachable && (n.tokens > 0 || !g?.maxTokens)) nextList.push({ set: s, grade: n.grade, tokens: n.tokens, cost: n.cost, buys: n.buys, per: n.tokens > 0 ? n.cost / n.tokens : n.cost });
+        const m = p.max;
+        if (m && m.grade && m.buys > 0) {
+          maxList.push({ set: s, ...m, current: p.grade });
+          toMax.credits += m.credits;
+          toMax.tax += m.tax;
+          toMax.sets++;
+        }
         const req = Number(p.required) || Number(s.required) || 0;
         if (req > 0 && Number(p.collected) < req) closest.push({ set: s, collected: Number(p.collected) || 0, required: req, partial: !!p.partial });
       }
@@ -735,7 +813,8 @@
     nextList.sort((a, b) => a.per - b.per || b.tokens - a.tokens);
     closest.sort((a, b) => b.collected / b.required - a.collected / a.required || a.required - b.required);
     sPossible.sort((a, b) => (b.score ?? 0) / b.target - (a.score ?? 0) / a.target || a.set.name.localeCompare(b.set.name, 'fr'));
-    return { synced, totalSets: sets.length, score, tokens, tokensTotal, partial, nextTokens: nextList, closest, sPossible };
+    maxList.sort((a, b) => a.tax - b.tax || a.credits - b.credits);
+    return { synced, totalSets: sets.length, score, tokens, tokensTotal, partial, nextTokens: nextList, closest, sPossible, maxList, toMax };
   }
   const loadProgress = () => load(K_PROGRESS, {}) ?? {};
   function saveProgress(key, p) {
@@ -1002,7 +1081,13 @@
     if (!need.length) return Promise.resolve();
     const id = ++priceSeq;
     return new Promise((resolve) => {
-      const timer = setTimeout(() => (priceWait.delete(id), resolve()), timeout);
+      const timer = setTimeout(() => {
+        // fut.gg muet : pas de nouvel essai pour ces cartes avant 10 min (évite d'attendre à chaque calcul)
+        const retry = Date.now() - PRICE_TTL + 6e5;
+        for (const d of need) priceCache.set(d, [priceCache.get(d)?.[0] ?? 0, retry]);
+        priceWait.delete(id);
+        resolve();
+      }, timeout);
       priceWait.set(id, () => (clearTimeout(timer), resolve()));
       window.postMessage({ ns: NS, dir: 'to-ext', prices: { id, ids: need.slice(0, 500) } }, window.location.origin);
     });
@@ -1018,7 +1103,7 @@
   }
 
   // Cartes du set ajoutées à sa liste (achat direct, sniper) avec leur prix connu
-  function adoptCards(set, items) {
+  function adoptCards(set, items, select = true) {
     const a = album();
     const s = a.sets[set.key];
     if (!s) return [];
@@ -1030,17 +1115,94 @@
         const at = X.attrsFrom(it) ?? {};
         let name = '';
         try {
-          const sd = it.getStaticData?.();
-          name = sd?.name || [sd?.firstName, sd?.lastName].filter(Boolean).join(' ');
+          name = X.staticName(it, '');
         } catch {}
         s.players[d] = { defId: d, name: String(name || it.name || d).slice(0, 60), rating: at.r || 0, minPrice: priceOf(it), rareflag: at.f, l: at.l || 0, c: at.c || 0, n: at.n || 0, collected: false, kept: true };
       }
       const pr = priceOf(it);
-      a.setSelected(d, true, pr >= 150 ? pr : 0);
+      if (select) a.setSelected(d, true, pr >= 150 ? pr : 0);
       ids.push(d);
     }
     a.saveSets();
     return ids;
+  }
+
+  // ---------- Sniper Galerie : lot de cartes snipées puis revendues, suivi dans une fenêtre ----------
+
+  let snipeDlg = null;
+  function snipe(name, defIds) {
+    const n = X.app?.snipeBatch(name, defIds) ?? 0;
+    if (!n) return void UI.toast(t('snipe.none'), 1);
+    openSnipeDialog();
+  }
+  function openSnipeDialog() {
+    if (snipeDlg) return snipeDlg.render();
+    const layer = UI.el('div', 'fc27g-modal');
+    const box = UI.el('div', 'fc27g-modal-box fc27g-snipe');
+    layer.appendChild(box);
+    document.body.appendChild(layer);
+    let timer = 0;
+    const close = () => {
+      clearInterval(timer);
+      layer.remove();
+      snipeDlg = null;
+    };
+    layer.addEventListener('click', (e) => e.target === layer && close());
+    const render = () => {
+      const s = X.app?.sniper;
+      const a = album();
+      const b = s?.batch ?? s?.lastBatch;
+      if (!s || !b) return close();
+      const active = s.batch === b;
+      const left = new Set(active ? b.filters.map((f) => Number(f.defId)) : []);
+      const mine = b.got ?? [];
+      const cur = active && s.running && s.task === 'snipe' ? s.filter : null;
+      let status;
+      if (!active) status = t('snipe.done', { n: b.cards.filter((c) => !left.has(c.defId) && a.isCollected(c.defId)).length, total: b.cards.length });
+      else if (s.guard.lockedUntil() > 0) status = t('snipe.locked');
+      else if (s.running && s.task === 'snipe') status = s.activity || t('snipe.starting');
+      else if (a.running) status = t('snipe.suspended');
+      else status = t('snipe.starting');
+      // Reconstruction seulement si l'état change : un clic sur « Arrêter » n'est pas perdu entre deux rafraîchissements
+      const sig = JSON.stringify([active, status, cur?.label, cur?.buyPrice, cur?.sellPrice, [...left], mine.map((x) => [x.defId, x.price, x.sell, x.kept]), b.cards.map((c) => a.isCollected(c.defId))]);
+      if (sig === snipeDlg?.sig) return;
+      if (snipeDlg) snipeDlg.sig = sig;
+      const spent = mine.reduce((sum, x) => sum + x.price, 0);
+      const cost = mine.reduce((sum, x) => sum + (x.sell ? x.price - X.net(x.sell) : x.kept ? x.price : 0), 0);
+      const rows = b.cards.map((c) => {
+        const got = mine.filter((x) => Number(x.defId) === c.defId);
+        const isCur = cur && Number(cur.defId) === c.defId;
+        const done = !left.has(c.defId) && (got.length || a.isCollected(c.defId));
+        const [txt, cls] = isCur ? [t('snipe.rowTarget'), 'is-target'] : done ? [t('snipe.rowGot'), 'is-done'] : left.has(c.defId) ? [t('snipe.rowWait'), ''] : [t('snipe.rowOut'), 'is-out'];
+        const detail = got.map((x) => t('snipe.sniped', { price: num(x.price) }) + (x.sell ? t('snipe.listed', { price: num(x.sell) }) : x.kept ? t('snipe.kept') : '')).join(' ; ');
+        const r = UI.el('div', `fc27g-snipe-row ${cls}`);
+        r.append(UI.el('span', 'fc27g-snipe-name', c.label), UI.el('span', 'fc27g-snipe-detail', detail), UI.el('span', 'fc27g-snipe-state', txt));
+        return r;
+      });
+      const actions = UI.el('div', 'fc27g-modal-actions');
+      if (active) actions.append(UI.button({ variant: 'danger', label: t('snipe.stop'), onTap: () => (X.app.stopBatch(), snipeDlg && (snipeDlg.sig = ''), render()) }));
+      actions.append(UI.button({ variant: active ? 'secondary' : 'primary', label: t('snipe.close'), onTap: close }));
+      const list = UI.el('div', 'fc27g-snipe-rows');
+      box.replaceChildren(
+        ...[
+        UI.el('h3', 'fc27g-modal-title', t('snipe.title', { name: b.name })),
+        UI.el('p', 'fc27g-modal-text', t('snipe.sub')),
+        UI.el('div', 'fc27g-snipe-status', status),
+        cur ? UI.el('div', 'fc27g-snipe-target', t('snipe.target', { name: cur.label }) + (cur.buyPrice ? t(cur.sellPrice ? 'snipe.prices' : 'snipe.pricesKeep', { buy: num(cur.buyPrice), sell: num(cur.sellPrice) }) : '')) : null,
+        UI.el('div', 'fc27g-snipe-stats', t('snipe.stats', { snipes: mine.length, spent: num(spent), net: cost >= 0 ? t('snipe.cost', { n: num(cost) }) : t('snipe.gain', { n: num(-cost) }) })),
+        list,
+        actions,
+        active ? UI.el('p', 'fc27g-snipe-hint', t('snipe.closeHint')) : null,
+        ].filter(Boolean),
+      );
+      const top = snipeDlg?.scroll ?? 0;
+      list.append(...rows);
+      list.scrollTop = top;
+      list.onscroll = () => snipeDlg && (snipeDlg.scroll = list.scrollTop);
+    };
+    snipeDlg = { render, close, scroll: 0, sig: '' };
+    timer = setInterval(render, 1e3);
+    render();
   }
 
   // ---------- Petits composants d'interface ----------
@@ -1296,6 +1458,9 @@
       if (this._bodyEl) this._set ? this._renderSetDetail() : this._renderSetGrid();
     };
     V._renderSetGrid = function () {
+      // Sets relus à chaque affichage : grades « possibles » et catalogue à jour après une synchro
+      const fresh = gallerySets();
+      if (fresh.length) this._data = { ...this._data, sets: fresh };
       this._clearBody();
       this._headerEl.innerHTML = '';
       const sets = (this._data?.sets || []).filter((s) => s.category === this._category);
@@ -1361,6 +1526,7 @@
       stat(t('ov.score'), num(r.score) + (r.partial ? '+' : ''), t('ov.scoreHint'));
       stat(t('ov.tokens'), r.tokensTotal ? t('ov.tokensOf', { n: num(r.tokens), total: num(r.tokensTotal) }) : '-', t('ov.tokensHint'));
       stat(t('ov.synced'), t('ov.tokensOf', { n: r.synced, total: r.totalSets }));
+      if (r.toMax.sets) stat(t('ov.toMax'), keepMode() ? t('ov.coins', { n: num(r.toMax.credits) }) : t('ov.toMaxValue', { tax: num(r.toMax.tax) }), t('ov.toMaxHint', { sets: r.toMax.sets, credits: num(r.toMax.credits), tax: num(r.toMax.tax) }));
       mine.appendChild(stats);
       const lv = block(t('ov.levels'), t('ov.levelsNote'));
       lv.classList.add('is-wide');
@@ -1371,6 +1537,18 @@
         ul.appendChild(li);
       }
       lv.appendChild(ul);
+      const mx = block(t('ov.max'), t('ov.maxNote'));
+      mx.classList.add('is-wide');
+      if (r.maxList.length)
+        for (const e of r.maxList.slice(0, 10))
+          row(
+            mx,
+            e.set,
+            t('ov.maxRow', { grade: e.grade, cur: e.current ? t('ov.maxCur', { grade: e.current }) : '', buys: e.buys }),
+            keepMode() ? t('ov.maxSideKeep', { credits: num(e.credits) }) : t('ov.maxSide', { credits: num(e.credits), tax: num(e.tax) }),
+            () => self._openSet(e.set, { grade: e.grade }),
+          );
+      else empty(mx, t('ov.maxEmpty'));
       const cheap = block(t('ov.cheapest'), t('ov.cheapestNote'));
       if (r.nextTokens.length)
         for (const e of r.nextTokens.slice(0, 6))
@@ -1389,6 +1567,30 @@
       if (r.sPossible.length) for (const e of r.sPossible.slice(0, 10)) row(sp, e.set, t('ov.sPossibleRow', { score: num(e.score ?? 0), target: num(e.target) }), null, null);
       else empty(sp, t('ov.sPossibleEmpty'));
       this._bodyEl.appendChild(wrap);
+    };
+    // Rang max atteignable (dernière synchro) : crédits à avancer et taxe
+    V._buildMaxLine = function (set, p) {
+      const m = p?.max;
+      const line = UI.el('div', 'fc27g-gallery-set-max');
+      if (!m) {
+        line.textContent = t('max.unsynced');
+        line.classList.add('is-muted');
+        return line;
+      }
+      const best = bestPossible(gradeFor(set, 0)?.ladder ?? []);
+      const extra = (m.unpriced ? t('max.hintUnpriced', { n: m.unpriced }) : '') + (best && best.grade !== m.grade ? t('max.best', { grade: best.grade }) : '');
+      if (!m.grade) {
+        line.textContent = t('max.none');
+        line.classList.add('is-muted');
+      } else if (!m.buys) {
+        line.textContent = t('max.reached', { grade: m.grade });
+        line.classList.add('is-done');
+      } else {
+        line.textContent = t(keepMode() ? 'max.lineKeep' : 'max.line', { grade: m.grade, credits: num(m.credits), tax: num(m.tax) });
+        line.title = t('max.hint', { buys: m.buys, grade: m.grade, unpriced: extra });
+      }
+      if (!line.title && extra) line.title = extra.trim();
+      return line;
     };
     V._buildSetCard = function (set) {
       const card = UI.el('div', 'fc27g-gallery-set-card');
@@ -1439,6 +1641,7 @@
       }
       card.appendChild(ladder);
       card.appendChild(UI.el('div', 'fc27g-gallery-tokens', g && g.maxTokens > 0 ? t('maxTokens', { n: g.maxTokens }) : ''));
+      card.appendChild(this._buildMaxLine(set, p));
       tap(card, () => this._openSet(set));
       return card;
     };
@@ -1803,7 +2006,16 @@
       const buys = counted.filter((e) => !e.isCollected);
       const unpriced = buys.filter((e) => !priceOf(e)).length;
       const cost = buys.reduce((s, e) => s + priceOf(e), 0);
-      if (cost > 0 || unpriced) row(t('cost'), `${num(cost)}${unpriced ? ` + ${unpriced} ${t('noPrice')}` : ''}`, 'fc27g-gallery-panel-row--cost');
+      if (cost > 0 || unpriced) {
+        row(t('panel.credits'), `${num(cost)}${unpriced ? ` + ${unpriced} ${t('noPrice')}` : ''}`, 'fc27g-gallery-panel-row--cost');
+        row(keepMode() ? t('panel.keep') : t('panel.tax'), num(buys.reduce((sum, e) => sum + taxOf(priceOf(e)), 0)));
+      }
+      const mp = this._ceilingKey === this._poolKey() ? this._max : null;
+      if (mp?.grade) {
+        const r = row(t('panel.max'), t(keepMode() ? 'panel.maxValueKeep' : 'panel.maxValue', { grade: mp.grade, credits: num(mp.credits), tax: num(mp.tax) }), 'fc27g-gallery-panel-row--max');
+        r.title = t('max.hint', { buys: mp.buys, grade: mp.grade, unpriced: mp.unpriced ? t('max.hintUnpriced', { n: mp.unpriced }) : '' }) + (this._next ? ` ${t('highestPartial')}` : '');
+        r.addEventListener('click', () => this._selectForGrade(mp.grade));
+      }
       if (g && g.maxTokens > 0) row(t('tokensEarned'), String(g.tokens));
       if (g?.reward) row(t('reward'), g.reward);
       P.appendChild(rows);
@@ -1827,10 +2039,11 @@
       buy.classList.add('fc27g-gallery-buy');
       if (!buys.length) buy.classList.add('disabled');
       P.appendChild(buy);
-      const snipe = UI.button({ label: t('snipeMissing', { n: buys.length }), onTap: () => this._snipeMissing(buys) });
-      snipe.classList.add('fc27g-gallery-buy');
-      if (!buys.length) snipe.classList.add('disabled');
-      P.appendChild(snipe);
+      const running = X.app?.sniper?.batch?.name === set.name;
+      const snipeBtn = UI.button({ label: running ? t('snipe.running') : t('snipeMissing', { n: buys.length }), onTap: () => (running ? openSnipeDialog() : this._snipeMissing(buys)) });
+      snipeBtn.classList.add('fc27g-gallery-buy');
+      if (!running && !buys.length) snipeBtn.classList.add('disabled');
+      P.appendChild(snipeBtn);
       const as = assume();
       P.appendChild(UI.el('p', 'fc27g-gallery-panel-note', as.firstOwnerMode === 'marks' ? t('bonusNoteMarks') : as.firstOwnerPct > 0 ? t('bonusNoteAssumed', { pct: as.firstOwnerPct }) : t('bonusNoteTags')));
       this._refreshCeiling();
@@ -1949,6 +2162,7 @@
         await this._awaitPoolPrices();
         if (this._poolKey() !== key) return;
         this._ceiling = ceilingOf(this._pool, this._set, priceOf);
+        this._max = maxPlan(this._set, this._pool, priceOf);
         this._ceilingKey = key;
         this._refreshPanel();
       } catch {
@@ -2021,8 +2235,9 @@
     };
     V._snipeMissing = function (items) {
       if (!items?.length) return;
-      const ids = adoptCards(this._set, items);
-      if (ids.length) X.app?.snipeSelection(ids);
+      const ids = adoptCards(this._set, items, false);
+      if (ids.length) snipe(this._set.name, ids);
+      this._refreshPanel();
     };
     // Retour sur la vue : cartes achetées depuis (achat direct, sniper, marché) comptées comme collectées
     V._recheck = async function () {
@@ -2121,7 +2336,8 @@
   // Vue Galerie poussée sur la navigation courante ; set ouvert (et grade visé) en option
   function open(key, grade) {
     if (!defineViews()) return false;
-    const nav = homeHub?.getNavigationController?.() ?? currentNav();
+    // Onglet affiché d'abord (sinon la vue serait poussée sur l'onglet Accueil masqué)
+    const nav = currentNav() ?? homeHub?.getNavigationController?.();
     if (!nav || typeof nav.pushViewController !== 'function') return false;
     const ctl = new Controller();
     ctl.init();
@@ -2284,5 +2500,6 @@
     progress: loadProgress,
     overview: () => overview(gallerySets(), loadProgress()),
     categoryLabel,
+    snipe,
   };
 })();

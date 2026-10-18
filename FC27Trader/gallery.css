@@ -1408,3 +1408,120 @@
   padding: 4px 10px;
   font-size: 12px;
 }
+
+/* Sniper Galerie (fenêtre de suivi) */
+
+.fc27g-modal-box.fc27g-snipe {
+  width: min(620px, 100%);
+  max-height: calc(100vh - 48px);
+}
+
+.fc27g-snipe-status {
+  padding: 8px 10px;
+  border-radius: 8px;
+  background: rgba(255, 200, 50, 0.08);
+  border: 1px solid rgba(255, 200, 50, 0.3);
+  color: var(--fc27g-gold);
+  font-size: 13px;
+}
+
+.fc27g-snipe-target,
+.fc27g-snipe-stats {
+  font-size: 13px;
+  color: #e6e9ec;
+}
+
+.fc27g-snipe-stats {
+  color: #2fbf88;
+  font-weight: 600;
+}
+
+.fc27g-snipe-rows {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  min-height: 0;
+  max-height: 46vh;
+  overflow-y: auto;
+}
+
+.fc27g-snipe-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto auto;
+  align-items: center;
+  gap: 10px;
+  padding: 6px 10px;
+  border-radius: 6px;
+  background: rgba(255, 255, 255, 0.04);
+  font-size: 13px;
+}
+
+.fc27g-snipe-name {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: #fff;
+}
+
+.fc27g-snipe-detail {
+  font-size: 12px;
+  color: #b6b6bf;
+}
+
+.fc27g-snipe-state {
+  font-size: 11px;
+  font-weight: 700;
+  color: #9a9aa2;
+}
+
+.fc27g-snipe-row.is-target {
+  background: rgba(255, 200, 50, 0.1);
+}
+
+.fc27g-snipe-row.is-target .fc27g-snipe-state {
+  color: var(--fc27g-gold);
+}
+
+.fc27g-snipe-row.is-done .fc27g-snipe-state {
+  color: #2fbf88;
+}
+
+.fc27g-snipe-row.is-out {
+  opacity: 0.5;
+}
+
+.fc27g-snipe-hint {
+  margin: 0;
+  font-size: 11px;
+  color: #8b8b94;
+}
+
+/* Rang max atteignable : crédits et taxe */
+
+.fc27g-gallery-set-max {
+  font-size: 11px;
+  font-weight: 600;
+  color: #e6e9ec;
+  min-height: 15px;
+}
+
+.fc27g-gallery-set-max.is-muted {
+  color: #8b8b94;
+  font-weight: 400;
+}
+
+.fc27g-gallery-set-max.is-done {
+  color: #2fbf88;
+}
+
+.fc27g-gallery-ov-stats {
+  grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));
+}
+
+.fc27g-gallery-panel-row--max {
+  cursor: pointer;
+}
+
+.fc27g-gallery-panel-row--max span:last-child {
+  color: #d4a9ff;
+}
