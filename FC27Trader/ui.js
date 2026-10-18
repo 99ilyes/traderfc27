@@ -1556,7 +1556,7 @@
       this.renderStrip();
       const a = this.album;
       const s = this.sniper;
-      const sig = `${a.mode}|${a.version}|${s.running}|${s.task}|${s.idx}|${this.cfg.snipeFilters}|${this.cfg.rotate}|${this.cfg.rotateEvery}`;
+      const sig = `${a.mode}|${a.version}|${s.running}|${s.task}|${s.idx}|${this.cfg.activeFilter}|${this.cfg.snipeFilters}|${this.cfg.rotate}|${this.cfg.rotateEvery}`;
       if (sig !== this.lastSig && !this.typing()) {
         this.lastSig = sig;
         if (this.tab === 'gallery' || this.tab === 'snipe') this.renderBody();
