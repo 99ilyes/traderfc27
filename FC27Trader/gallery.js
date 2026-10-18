@@ -129,20 +129,24 @@
     'snipe.running': '🎯 Sniper Galerie en cours (voir)',
     'snipe.none': 'Aucune carte à sniper : toutes déjà dans la Galerie.',
     'snipe.title': 'Sniper Galerie · {name}',
-    'snipe.sub': 'Achat sous le prix du marché, revente 1 h avec profit, jamais sous le prix d’achat taxe comprise (mêmes prix que le sniper). Les cartes alternent ; une carte obtenue est retirée du lot. Tes cibles habituelles ne sont pas touchées et reprennent à la fin si le sniper tournait.',
+    'snipe.sub': 'But : remplir la Galerie au moindre coût en récupérant vite les crédits. Achat jusqu’à un palier sous la moins chère du marché, une carte par joueur, puis revente 1 h au prix du marché (même palier), jamais sous le prix d’achat : coût d’une carte au plus = taxe EA de 5 %, gain si achetée en dessous. « Après achat » de la Galerie respecté (marge, ou club). Invendus remis en vente au prix du marché pendant les pauses. Les cartes alternent ; une carte obtenue est retirée du lot. Tes cibles habituelles ne sont pas touchées et reprennent à la fin si le sniper tournait.',
     'snipe.starting': 'Démarrage…',
     'snipe.suspended': 'Suspendu pendant une tâche Galerie (achats, lecture des joueurs), reprise ensuite',
     'snipe.locked': 'Pause anti-captcha, reprise automatique',
     'snipe.done': 'Terminé : {n} / {total} carte(s) obtenue(s)',
     'snipe.target': 'Cible : {name}',
-    'snipe.prices': ' · achat ≤ {buy} · vente {sell}',
-    'snipe.stats': '{snipes} snipée(s) · profit attendu {profit} crédits',
+    'snipe.prices': ' · achat ≤ {buy} · revente {sell}',
+    'snipe.pricesKeep': ' · achat ≤ {buy} · gardée au club',
+    'snipe.stats': '{snipes} obtenue(s) · {spent} crédits dépensés · {net}',
+    'snipe.cost': 'coût net estimé {n} crédits',
+    'snipe.gain': 'gain net estimé {n} crédits',
     'snipe.rowTarget': 'Ciblée',
     'snipe.rowWait': 'En attente',
     'snipe.rowGot': 'Obtenue',
     'snipe.rowOut': 'Retirée',
     'snipe.sniped': 'snipée à {price}',
     'snipe.listed': ' · en vente à {price}',
+    'snipe.kept': ' · gardée au club',
     'snipe.stop': 'Arrêter le sniper Galerie',
     'snipe.close': 'Fermer',
     'snipe.closeHint': 'Le sniper Galerie continue en arrière-plan (bandeau du panneau FC27 Trader).',
@@ -1091,7 +1095,7 @@
       if (!s || !b) return close();
       const active = s.batch === b;
       const left = new Set(active ? b.filters.map((f) => Number(f.defId)) : []);
-      const mine = Object.values(s.snipes).filter((x) => x.at >= b.at && b.cards.some((c) => c.defId === Number(x.defId)));
+      const mine = b.got ?? [];
       const cur = active && s.running && s.task === 'snipe' ? s.filter : null;
       let status;
       if (!active) status = t('snipe.done', { n: b.cards.filter((c) => !left.has(c.defId) && a.isCollected(c.defId)).length, total: b.cards.length });
@@ -1099,13 +1103,14 @@
       else if (s.running && s.task === 'snipe') status = s.activity || t('snipe.starting');
       else if (a.running) status = t('snipe.suspended');
       else status = t('snipe.starting');
-      const profit = mine.reduce((sum, x) => sum + (x.listPrice ? X.profitOf(x.price, x.listPrice) : 0), 0);
+      const spent = mine.reduce((sum, x) => sum + x.price, 0);
+      const cost = mine.reduce((sum, x) => sum + (x.sell ? x.price - X.net(x.sell) : x.kept ? x.price : 0), 0);
       const rows = b.cards.map((c) => {
         const got = mine.filter((x) => Number(x.defId) === c.defId);
         const isCur = cur && Number(cur.defId) === c.defId;
         const done = !left.has(c.defId) && (got.length || a.isCollected(c.defId));
         const [txt, cls] = isCur ? [t('snipe.rowTarget'), 'is-target'] : done ? [t('snipe.rowGot'), 'is-done'] : left.has(c.defId) ? [t('snipe.rowWait'), ''] : [t('snipe.rowOut'), 'is-out'];
-        const detail = got.map((x) => t('snipe.sniped', { price: num(x.price) }) + (x.listPrice ? t('snipe.listed', { price: num(x.listPrice) }) : '')).join(' ; ');
+        const detail = got.map((x) => t('snipe.sniped', { price: num(x.price) }) + (x.sell ? t('snipe.listed', { price: num(x.sell) }) : x.kept ? t('snipe.kept') : '')).join(' ; ');
         const r = UI.el('div', `fc27g-snipe-row ${cls}`);
         r.append(UI.el('span', 'fc27g-snipe-name', c.label), UI.el('span', 'fc27g-snipe-detail', detail), UI.el('span', 'fc27g-snipe-state', txt));
         return r;
@@ -1119,8 +1124,8 @@
         UI.el('h3', 'fc27g-modal-title', t('snipe.title', { name: b.name })),
         UI.el('p', 'fc27g-modal-text', t('snipe.sub')),
         UI.el('div', 'fc27g-snipe-status', status),
-        cur ? UI.el('div', 'fc27g-snipe-target', t('snipe.target', { name: cur.label }) + (cur.buyPrice ? t('snipe.prices', { buy: num(cur.buyPrice), sell: num(cur.sellPrice) }) : '')) : null,
-        UI.el('div', 'fc27g-snipe-stats', t('snipe.stats', { snipes: mine.length, profit: num(profit) })),
+        cur ? UI.el('div', 'fc27g-snipe-target', t('snipe.target', { name: cur.label }) + (cur.buyPrice ? t(cur.sellPrice ? 'snipe.prices' : 'snipe.pricesKeep', { buy: num(cur.buyPrice), sell: num(cur.sellPrice) }) : '')) : null,
+        UI.el('div', 'fc27g-snipe-stats', t('snipe.stats', { snipes: mine.length, spent: num(spent), net: cost >= 0 ? t('snipe.cost', { n: num(cost) }) : t('snipe.gain', { n: num(-cost) }) })),
         list,
         actions,
         active ? UI.el('p', 'fc27g-snipe-hint', t('snipe.closeHint')) : null,

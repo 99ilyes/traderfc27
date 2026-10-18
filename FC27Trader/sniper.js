@@ -2,7 +2,7 @@
 // (attend au lieu de s'arrêter, reprend après rechargement), alternance des cibles en option, pause courte après captcha.
 (function () {
   const X = globalThis.__fc27;
-  const { fmt, rand, randInt, clockIn, load, save, priceDown, profitOf, breakEven, net, errMsg } = X;
+  const { fmt, rand, randInt, clockIn, load, save, priceDown, profitOf, breakEven, net, roundPrice, errMsg } = X;
   const NS = X.SNIPE_NS;
   const K_RESUME = `${NS}:resume`;
   const K_ON = `${NS}:on`;
@@ -95,7 +95,7 @@
     // Sniper Galerie (popup de la vue Galerie) : lot de cartes à part des cibles habituelles, { name, cards, filters, idx, prevOn, at }
     batch = load(K_BATCH, null);
 
-    // hooks : { onSnipe(defId, raw), isCollected(defId), albumSold(item), albumPrice(id), albumOnSale(), onListed(id, price), otherBusy(), afterTask() }
+    // hooks : { gallerySnipe(id, defId, name, price, sell, kept, listed), onSnipe(defId, raw), isCollected(defId), albumSold(item), albumPrice(id), albumOnSale(), onListed(id, price), otherBusy(), afterTask() }
     constructor(getConfig, onUpdate, patchConfig, hooks) {
       this.getConfig = getConfig;
       this.onUpdate = onUpdate;
@@ -636,7 +636,8 @@
           win = { n: 0, start: Date.now() };
           continue;
         }
-        const budget = this.buyBudget();
+        // Lot Galerie : une seule carte par joueur suffit
+        const budget = this.batch ? 1 : this.buyBudget();
         let wallet = X.coins() ?? Infinity;
         this.setActivity(`Recherche ${f.label} ≤ ${fmt(f.buyPrice)}`, 'search');
         const res = await X.searchFilter(f, range);
@@ -823,6 +824,15 @@
     }
     applyPrices(f, lowest, minPrice) {
       this.pricedAt = Date.now();
+      // Lot Galerie : collection, pas profit. Achat jusqu'à un palier sous la moins chère du marché ; revente au prix du marché
+      // (même palier), jamais sous le prix d'achat (« Après achat » de la Galerie) : crédits récupérés vite pour les cartes suivantes
+      if (this.batch && f.album) {
+        f.buyPrice = priceDown(lowest);
+        f.sellPrice = X.galleryResale(f.buyPrice, priceDown(lowest), this.cfg);
+        this.saveFilters();
+        this.note(`${f.label} (Galerie) : achat jusqu'à ${fmt(f.buyPrice)}, ${f.sellPrice ? `revente au prix du marché ${fmt(f.sellPrice)} (coût ~${fmt(f.buyPrice - net(f.sellPrice))} au plus, taxe EA)` : 'gardée au club'}`);
+        return true;
+      }
       const r = this.computePrices(lowest, minPrice);
       if (r.status !== 'ok') {
         this.note(r.status === 'belowListable' ? `${f.label} : prix sous le minimum EA` : `${f.label} : aucun prix d'achat rentable`, 'error');
@@ -845,13 +855,19 @@
         const name = label(it);
         if (res.success) {
           this.run.snipes++;
-          this.session.snipes++;
           const id = Number(it.raw?.id);
           const defId = it.defId || this.filter.defId || 0;
-          const sid = this.stats.snipe(defId, name, it.buyNow);
-          if (id) {
-            this.snipes[id] = { defId, label: name, price: it.buyNow, at: Date.now(), sid };
-            save(K_SNIPES, this.snipes);
+          // Lot Galerie : coût suivi par la Galerie, hors statistiques de profit du sniper
+          if (this.batch && this.filter.album) {
+            this.batch.got = [...(this.batch.got ?? []), { id, defId, price: it.buyNow, sell: 0, at: Date.now() }];
+            save(K_BATCH, this.batch);
+          } else {
+            this.session.snipes++;
+            const sid = this.stats.snipe(defId, name, it.buyNow);
+            if (id) {
+              this.snipes[id] = { defId, label: name, price: it.buyNow, at: Date.now(), sid };
+              save(K_SNIPES, this.snipes);
+            }
           }
           this.note(`Snipé ${name} à ${fmt(it.buyNow)} ! (${ageText(it.expires)}, réponse en ${ms} ms)`, 'snipe');
           if (this.cfg.snipeSound) X.beep();
@@ -879,6 +895,7 @@
       const f = this.filter;
       const name = label(it);
       const defId = it.defId || f.defId || 0;
+      if (this.batch && f.album) return await this.afterGallerySnipe(it, name, defId), false;
       if (!this.cfg.sellAfterSnipe) return await this.moveTransfer(it.raw, name), false;
       let sell = f.sellPrice;
       let repriced = false;
@@ -903,6 +920,30 @@
         this.note(`Mis en vente ${name} à ${fmt(sell)} (profit attendu ${fmt(gain)})`);
       }
       return repriced;
+    }
+    // Carte du lot Galerie : remise en vente au prix d'achat (ou marge, ou club) selon « Après achat » de la Galerie
+    async afterGallerySnipe(it, name, defId) {
+      const id = Number(it.raw?.id);
+      const p = defId ? this.prices[defId] : null;
+      const sell = X.galleryResale(it.buyNow, p ? priceDown(p.lowest) : this.filter.sellPrice, this.cfg);
+      const got = this.batch?.got?.find((g) => g.id === id);
+      const done = (listed, kept) => {
+        if (got) {
+          got.sell = listed;
+          got.kept = kept;
+          save(K_BATCH, this.batch);
+        }
+        this.hooks.gallerySnipe(id, defId, name, it.buyNow, sell, kept, !!listed);
+      };
+      if (!sell || X.transferCount() >= X.PILE_MAX) {
+        const m = await X.toClub(it.raw);
+        this.note(`${name} ${m.success ? 'gardé au club' : 'laissé dans les non-assignés'} (Galerie${sell ? ', liste de transferts pleine' : ''})`);
+        return done(0, m.success);
+      }
+      if (!(await this.moveTransfer(it.raw, name))) return done(0, false);
+      const listed = (await this.list(it.raw, name, sell)) ? sell : 0;
+      if (listed) this.note(`Mis en vente ${name} à ${fmt(sell)} (Galerie, ${profitOf(it.buyNow, sell) >= 0 ? `gain ${fmt(profitOf(it.buyNow, sell))}` : `coût ${fmt(-profitOf(it.buyNow, sell))}`})`);
+      done(listed, false);
     }
     async moveTransfer(raw, name, why = '') {
       const r = await X.toTransfer(raw);
@@ -1003,21 +1044,40 @@
         this.note(`Non-assigné rangé en liste de transferts${sn ? ` : ${sn.label}` : ''}`);
         if (sn && this.cfg.sellAfterSnipe) await this.relist(raw, Number(raw.id), false);
       }
+      const stale = (i) => i.raw && (i.state === 'expired' || i.state === 'unlisted');
+      // Invendus Galerie (achat direct, sniper Galerie) : remis en vente au prix du marché, jamais sous le prix payé
+      for (const i of pile.items.filter((x) => !this.snipes[x.id] && this.hooks.albumPrice(x.id) > 0 && stale(x)).slice(0, 10)) {
+        this.checkStop();
+        await this.relistGallery(i);
+      }
       if (!this.cfg.sellAfterSnipe) return;
-      const unsold = pile.items.filter((i) => this.snipes[i.id] && i.raw && (i.state === 'expired' || i.state === 'unlisted'));
+      const unsold = pile.items.filter((i) => this.snipes[i.id] && stale(i));
       for (const i of unsold.slice(0, 10)) {
         this.checkStop();
         await this.relist(i.raw, i.id, i.state === 'expired');
       }
     }
+    async marketOf(defId, name) {
+      let p = defId ? this.prices[defId] : null;
+      if (defId && (!p || Date.now() - p.at > RELIST_PRICE_TTL)) {
+        const c = await this.priceCheck({ defId, criteria: null }, name);
+        if (c) p = this.prices[defId] = { ...c, at: Date.now() };
+      }
+      return p ?? null;
+    }
+    async relistGallery(i) {
+      const paid = this.hooks.albumPrice(i.id);
+      const p = await this.marketOf(i.defId, i.name);
+      const price = X.galleryResale(paid, p ? priceDown(p.lowest) : 0, this.cfg) || roundPrice(paid);
+      if (await this.list(i.raw, i.name, price)) {
+        this.hooks.onListed(i.id, price);
+        this.note(`${i.state === 'expired' ? 'Remis' : 'Mis'} en vente ${i.name} à ${fmt(price)} (Galerie${p && price > roundPrice(paid) ? ', prix du marché' : ''})`);
+      }
+    }
     async relist(raw, id, expired) {
       const sn = this.snipes[id];
       if (!sn) return;
-      let p = this.prices[sn.defId];
-      if (!p || Date.now() - p.at > RELIST_PRICE_TTL) {
-        const c = sn.defId ? await this.priceCheck({ defId: sn.defId, criteria: null }, sn.label) : null;
-        if (c) p = this.prices[sn.defId] = { ...c, at: Date.now() };
-      }
+      const p = await this.marketOf(sn.defId, sn.label);
       if (!p) return;
       const price = Math.max(priceDown(p.lowest), breakEven(sn.price));
       if (await this.list(raw, sn.label, price)) {

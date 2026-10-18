@@ -78,10 +78,13 @@
   const costOf = (q) => (q.status === 'listed' ? q.price - netOf(q.sell || q.price) : q.price);
   const tolOf = (cfg) => (cfg.toleranceAuto ? DEFAULT_TOLERANCE : cfg.tolerance);
   const sellFor = (p, cfg) => (cfg.afterBuy === 'keep' ? 0 : cfg.afterBuy === 'markup' ? markupPrice(p, cfg.markupPct) : roundPrice(p));
+  // Revente d'une carte Galerie (achat direct, sniper Galerie, relist) : prix du marché (un palier sous la moins chère) si l'achat est en dessous,
+  // sinon prix d'achat (ou marge) ; 0 = gardée au club. Crédits récupérés au plus vite pour acheter les cartes suivantes
+  const resaleFor = (p, market, cfg) => (cfg.afterBuy === 'keep' ? 0 : Math.max(sellFor(p, cfg), roundPrice(Number(market) || 0)));
   const isOpen = (q) => q.status === 'pending' || q.status === 'searching';
   const isUnsold = (b) => b.state === 'expired' || b.state === 'unlisted';
   const EMPTY_TOTAL = { bought: 0, spent: 0, sold: 0, received: 0, tax: 0, lost: 0, kept: 0, keptSpent: 0 };
-  Object.assign(X, { isDone, isFailed, isOpen, isUnsold, tolOf, netOf, step: X.step });
+  Object.assign(X, { isDone, isFailed, isOpen, isUnsold, tolOf, netOf, step: X.step, galleryResale: resaleFor });
 
   X.Album = class {
     mode = null; // 'buy' | 'check' | null
@@ -476,6 +479,20 @@
       this.setSelected(defId, false);
       this.log(`${p.name} obtenu par snipe pour la Galerie`, 'buy');
       return true;
+    }
+    // Carte du sniper Galerie (lot) : coût suivi comme un achat direct Galerie (revente au prix d'achat, taxe = coût)
+    onGallerySnipe(id, defId, name, price, sell, kept, listed) {
+      this.addTotal('bought', 1);
+      this.addTotal('spent', price);
+      if (kept) {
+        this.addTotal('kept', 1);
+        this.addTotal('keptSpent', price);
+      } else if (id) {
+        // Mise en vente échouée : suivie comme invendue, « Relister » ne descend jamais sous le prix payé
+        this.bought[id] = { price, sell: sell || price, defId, name, state: listed ? 'active' : 'unlisted', at: Date.now() };
+        this.saveBought();
+      }
+      this.touch();
     }
     // Vente d'une carte achetée pour la Galerie : décomptée ici (le sniper l'affiche dans les ventes)
     recordSold(i) {
@@ -1016,7 +1033,7 @@
         await keep(keepMode ? '' : 'liste de transferts pleine');
         return 'ok';
       }
-      const l = await X.listClamped(it.raw, sellFor(price, cfg));
+      const l = await X.listClamped(it.raw, resaleFor(price, e.market, cfg));
       if (!l.success) {
         if (this.fatal(l, 'list')) return 'stop';
         await keep(`mise en vente échouée (statut ${l.status})${errText(l.error)}`);
