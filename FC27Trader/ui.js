@@ -647,7 +647,8 @@
       if (this.typing(this.snipeSec)) return this.renderSnipeLive();
       const s = this.sniper;
       const cfg = this.cfg;
-      const snipe = s.running && s.task === 'snipe';
+      // Lot Galerie en cours : cibles habituelles modifiables (le sniper ne tourne pas dessus)
+      const snipe = this.app.live();
       const list = this.app.targets();
       const activeIdx = snipe ? s.idx : cfg.activeFilter;
       // Cibles
@@ -998,7 +999,7 @@
       markInput.onchange = () => (this.app.setConfig({ markupPct: Math.min(100, Math.max(0, Number(markInput.value) || 0)) }), this.renderBuy());
       const desc = {
         keep: 'Les cartes vont au club. Coût = prix payé.',
-        relist: 'Remise en vente au prix payé. Coût = taxe EA de 5 %.',
+        relist: 'Remise en vente au prix du marché (un palier sous la moins chère) si la carte a été achetée en dessous, jamais sous le prix payé. Coût au plus = taxe EA de 5 %.',
         markup: 'Remise en vente un peu au-dessus du prix payé : couvre la plus grande partie de la taxe, vente un peu plus lente.',
       };
       const opts = Object.entries(X.AFTER_BUY).map(([k, lbl]) =>

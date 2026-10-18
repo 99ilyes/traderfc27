@@ -174,7 +174,8 @@
       return out;
     }
     emit() {
-      if (this.running && this.task === 'snipe') {
+      // Lot Galerie : hors suivi du sniper (temps, recherches, profit / h)
+      if (this.running && this.task === 'snipe' && !this.batch) {
         const now = Date.now();
         const d = now - this.lastTick;
         const working = this.tickPhase !== 'break' && this.tickPhase !== 'wait';
@@ -205,7 +206,7 @@
       this.session = { ...EMPTY_SESSION, since: Date.now() };
       this.sales = [];
       this.stats.reset();
-      if (this.running && this.task === 'snipe') this.stats.begin();
+      if (this.running && this.task === 'snipe' && !this.batch) this.stats.begin();
       save(K_SESSION, this.session);
       save(K_SALES, this.sales);
       this.emit();
@@ -221,7 +222,10 @@
       this.setOn(true);
       if (this.hooks.otherBusy()) return this.note('Sniper : démarrage à la fin de la tâche Galerie en cours');
       this.batch = load(K_BATCH, null);
-      if (this.batch && !this.batch.filters?.length) this.endBatch('aucune carte');
+      if (this.batch && !this.batch.filters?.length) {
+        this.endBatch('aucune carte');
+        if (!this.on) return this.hooks.afterTask();
+      }
       this.filters = this.batch ? this.batch.filters : X.parseFilters(this.cfg.snipeFilters);
       if (!this.filters.length) {
         this.setOn(false);
@@ -238,9 +242,11 @@
       this.tickPhase = 'idle';
       this.pricedAt = 0;
       this.tooManyNoted = false;
-      const resumed = this.stats.current;
-      const cur = this.stats.begin();
-      if (resumed && resumed !== cur) this.note('Plus de 30 min d’interruption : nouvelle session de suivi');
+      if (!this.batch) {
+        const resumed = this.stats.current;
+        const cur = this.stats.begin();
+        if (resumed && resumed !== cur) this.note('Plus de 30 min d’interruption : nouvelle session de suivi');
+      }
       if (this.batch) this.note(`Sniper Galerie « ${this.batch.name} » : ${this.filters.length} carte(s) à sniper, alternance des cartes`);
       else this.note(`Sniper : démarrage${this.cfg.rotate ? ', alternance des cibles' : ''}`);
       if (!this.batch && this.cfg.rotate && this.filters.length < 2) this.note('Une seule cible : en ajouter une 2e pour alterner toutes les 450 à 900 recherches');
@@ -343,7 +349,7 @@
             const sn = this.snipes[c.id];
             // Plancher : prix d'achat taxe comprise (snipe), prix payé (achat Galerie)
             const floor = sn ? breakEven(sn.price) : this.hooks.albumPrice(c.id);
-            const price = Math.max(sell, floor);
+            const price = sn ? Math.max(sell, floor) : X.galleryResale(floor, sell, this.cfg) || Math.max(sell, floor);
             this.setActivity(`Mise en vente de ${name} à ${fmt(price)}`, 'price');
             const done = c.raw ? await this.list(c.raw, name, price) : await this.listId(c.id, name, price);
             if (done) {
@@ -656,8 +662,10 @@
         for (const i of buys) this.seen.add(i.tradeId), this.guard.recordPurchase();
         this.guard.recordSearch();
         this.run.searches++;
-        this.session.searches++;
-        this.stats.search(f);
+        if (!this.batch) {
+          this.session.searches++;
+          this.stats.search(f);
+        }
         win.n++;
         sinceCheck++;
         if (res.success) {
@@ -741,7 +749,10 @@
           }
           this.emit();
           const bad = this.checkFilter(f);
-          if (!bad && (!f.auto || (await this.priceFilter(f)))) return (this.tooManyNoted = false), true;
+          // Reprise après une tâche Galerie ou un rechargement : prix de moins de 5 min réutilisés (pas de nouveau sondage)
+          const fresh = f.auto && f.buyPrice > 0 && Date.now() - (f.pricedAt ?? 0) < PRICE_FRESH;
+          if (fresh) this.pricedAt = f.pricedAt;
+          if (!bad && (!f.auto || fresh || (await this.priceFilter(f)))) return (this.tooManyNoted = false), true;
           this.note(`${bad ?? `${f.label} : pas de prix rentable trouvé`}, cible suivante`, 'error');
           this.idx = (this.idx + 1) % this.filters.length;
         }
@@ -801,7 +812,7 @@
     async search(filter, range) {
       const r = await X.searchFilter(filter, range);
       this.guard.recordSearch();
-      this.session.otherSearches++;
+      if (!this.batch) this.session.otherSearches++;
       if (!r.success) {
         if (r.status === 401) this.sessionExpired();
         if (X.BAD_STATUS.has(r.status)) this.lockout(`Statut EA ${r.status} (captcha ou limite)`);
@@ -827,8 +838,11 @@
       // Lot Galerie : collection, pas profit. Achat jusqu'à un palier sous la moins chère du marché ; revente au prix du marché
       // (même palier), jamais sous le prix d'achat (« Après achat » de la Galerie) : crédits récupérés vite pour les cartes suivantes
       if (this.batch && f.album) {
-        f.buyPrice = priceDown(lowest);
-        f.sellPrice = X.galleryResale(f.buyPrice, priceDown(lowest), this.cfg);
+        // Moins chère au prix minimum EA : personne ne peut annoncer en dessous, achat à ce prix
+        const under = priceDown(lowest);
+        f.buyPrice = minPrice && under < minPrice ? lowest : under;
+        f.sellPrice = X.galleryResale(f.buyPrice, under, this.cfg);
+        f.pricedAt = this.pricedAt;
         this.saveFilters();
         this.note(`${f.label} (Galerie) : achat jusqu'à ${fmt(f.buyPrice)}, ${f.sellPrice ? `revente au prix du marché ${fmt(f.sellPrice)} (coût ~${fmt(f.buyPrice - net(f.sellPrice))} au plus, taxe EA)` : 'gardée au club'}`);
         return true;
@@ -840,6 +854,7 @@
       }
       f.buyPrice = r.buyPrice;
       f.sellPrice = r.sellPrice;
+      f.pricedAt = this.pricedAt;
       this.saveFilters();
       const how = this.cfg.minProfit > 0 ? 'profit min choisi' : '2 % du prix, 150 minimum';
       this.note(`Achat jusqu'à ${fmt(r.buyPrice)}, vente ${fmt(r.sellPrice)} (${how} : ${fmt(r.targetProfit)}${r.profit < r.targetProfit ? `, profit réduit à ${fmt(r.profit)}` : ''})`);
@@ -876,8 +891,10 @@
         } else if (res.status === 401 || X.BAD_STATUS.has(res.status)) fatal ??= res.status;
         else if (X.MISS_STATUS.has(res.status)) {
           this.run.misses++;
-          this.session.misses++;
-          this.stats.miss(it.defId || this.filter.defId || 0, name);
+          if (!this.batch) {
+            this.session.misses++;
+            this.stats.miss(it.defId || this.filter.defId || 0, name);
+          }
           this.note(`Raté de peu : ${name} à ${fmt(it.buyNow)} (${ageText(it.expires)}, réponse en ${ms} ms)`, 'miss');
         } else {
           this.seen.delete(it.tradeId);
@@ -921,7 +938,16 @@
       }
       return repriced;
     }
-    // Carte du lot Galerie : remise en vente au prix d'achat (ou marge, ou club) selon « Après achat » de la Galerie
+    // Mise en vente d'une carte Galerie bornée à la fourchette EA (carte au prix minimum) ; prix retenu, 0 si échec
+    async listGallery(raw, name, price) {
+      const r = await X.listClamped(raw, price);
+      if (r.success) return r.price;
+      if (r.status === 401) this.sessionExpired();
+      if (X.BAD_STATUS.has(r.status)) this.lockout(`Statut EA ${r.status} (captcha ou limite)`);
+      this.note(`Mise en vente de ${name} échouée (statut ${r.status})`, 'error');
+      return 0;
+    }
+    // Carte du lot Galerie : revente au prix du marché, jamais sous le prix d'achat (ou marge, ou club) selon « Après achat » de la Galerie
     async afterGallerySnipe(it, name, defId) {
       const id = Number(it.raw?.id);
       const p = defId ? this.prices[defId] : null;
@@ -933,7 +959,7 @@
           got.kept = kept;
           save(K_BATCH, this.batch);
         }
-        this.hooks.gallerySnipe(id, defId, name, it.buyNow, sell, kept, !!listed);
+        this.hooks.gallerySnipe(id, defId, name, it.buyNow, listed || sell, kept, !!listed);
       };
       if (!sell || X.transferCount() >= X.PILE_MAX) {
         const m = await X.toClub(it.raw);
@@ -941,8 +967,8 @@
         return done(0, m.success);
       }
       if (!(await this.moveTransfer(it.raw, name))) return done(0, false);
-      const listed = (await this.list(it.raw, name, sell)) ? sell : 0;
-      if (listed) this.note(`Mis en vente ${name} à ${fmt(sell)} (Galerie, ${profitOf(it.buyNow, sell) >= 0 ? `gain ${fmt(profitOf(it.buyNow, sell))}` : `coût ${fmt(-profitOf(it.buyNow, sell))}`})`);
+      const listed = await this.listGallery(it.raw, name, sell);
+      if (listed) this.note(`Mis en vente ${name} à ${fmt(listed)} (Galerie, ${profitOf(it.buyNow, listed) >= 0 ? `gain ${fmt(profitOf(it.buyNow, listed))}` : `coût ${fmt(-profitOf(it.buyNow, listed))}`})`);
       done(listed, false);
     }
     async moveTransfer(raw, name, why = '') {
@@ -1068,8 +1094,8 @@
     async relistGallery(i) {
       const paid = this.hooks.albumPrice(i.id);
       const p = await this.marketOf(i.defId, i.name);
-      const price = X.galleryResale(paid, p ? priceDown(p.lowest) : 0, this.cfg) || roundPrice(paid);
-      if (await this.list(i.raw, i.name, price)) {
+      const price = await this.listGallery(i.raw, i.name, X.galleryResale(paid, p ? priceDown(p.lowest) : 0, this.cfg) || roundPrice(paid));
+      if (price) {
         this.hooks.onListed(i.id, price);
         this.note(`${i.state === 'expired' ? 'Remis' : 'Mis'} en vente ${i.name} à ${fmt(price)} (Galerie${p && price > roundPrice(paid) ? ', prix du marché' : ''})`);
       }

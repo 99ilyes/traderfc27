@@ -111,7 +111,7 @@
     risky: { label: 'Risqué', info: 'pause 1-3 min toutes les 8-15 min, 10-20 min toutes les 2-3 h', every: [480, 900], rest: [60, 180], longEvery: [7200, 10800], longRest: [600, 1200] },
     dangerous: { label: 'Dangereux', info: 'aucune pause', every: null, rest: null, longEvery: null, longRest: null },
   };
-  X.AFTER_BUY = { keep: 'Garder au club', relist: "Revendre au prix d'achat", markup: 'Revendre avec marge' };
+  X.AFTER_BUY = { keep: 'Garder au club', relist: 'Revendre au prix du marché', markup: 'Revendre avec marge' };
 
   // ---------- Réglages (un seul objet, enregistré sous la clé de SnipeFC27) ----------
 

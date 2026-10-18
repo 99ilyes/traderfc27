@@ -1103,6 +1103,10 @@
       else if (s.running && s.task === 'snipe') status = s.activity || t('snipe.starting');
       else if (a.running) status = t('snipe.suspended');
       else status = t('snipe.starting');
+      // Reconstruction seulement si l'état change : un clic sur « Arrêter » n'est pas perdu entre deux rafraîchissements
+      const sig = JSON.stringify([active, status, cur?.label, cur?.buyPrice, cur?.sellPrice, [...left], mine.map((x) => [x.defId, x.price, x.sell, x.kept]), b.cards.map((c) => a.isCollected(c.defId))]);
+      if (sig === snipeDlg?.sig) return;
+      if (snipeDlg) snipeDlg.sig = sig;
       const spent = mine.reduce((sum, x) => sum + x.price, 0);
       const cost = mine.reduce((sum, x) => sum + (x.sell ? x.price - X.net(x.sell) : x.kept ? x.price : 0), 0);
       const rows = b.cards.map((c) => {
@@ -1116,7 +1120,7 @@
         return r;
       });
       const actions = UI.el('div', 'fc27g-modal-actions');
-      if (active) actions.append(UI.button({ variant: 'danger', label: t('snipe.stop'), onTap: () => (X.app.stopBatch(), render()) }));
+      if (active) actions.append(UI.button({ variant: 'danger', label: t('snipe.stop'), onTap: () => (X.app.stopBatch(), snipeDlg && (snipeDlg.sig = ''), render()) }));
       actions.append(UI.button({ variant: active ? 'secondary' : 'primary', label: t('snipe.close'), onTap: close }));
       const list = UI.el('div', 'fc27g-snipe-rows');
       box.replaceChildren(
@@ -1136,7 +1140,7 @@
       list.scrollTop = top;
       list.onscroll = () => snipeDlg && (snipeDlg.scroll = list.scrollTop);
     };
-    snipeDlg = { render, close, scroll: 0 };
+    snipeDlg = { render, close, scroll: 0, sig: '' };
     timer = setInterval(render, 1e3);
     render();
   }

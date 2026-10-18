@@ -58,9 +58,9 @@
       addTarget(t) {
         this.editTargets((list, active) => {
           const n = list.findIndex((f) => f.label === t.label);
-          if (n >= 0) return sniper.running ? active : n;
+          if (n >= 0) return this.live() ? active : n;
           list.push(this.newTarget(t));
-          return sniper.running ? active : list.length - 1;
+          return this.live() ? active : list.length - 1;
         });
       },
       removeTarget(id) {
@@ -72,7 +72,7 @@
         });
       },
       setActiveTarget(n) {
-        if (!sniper.running) this.setConfig({ activeFilter: n });
+        if (!this.live()) this.setConfig({ activeFilter: n });
       },
       patchTarget(id, patch) {
         if (this.live()) return;
@@ -82,14 +82,14 @@
         });
       },
       clearAlbumTargets() {
-        if (sniper.running) return;
+        if (this.live()) return;
         this.editTargets((list) => {
           const keep = list.filter((f) => !f.album);
           list.splice(0, list.length, ...keep);
           return 0;
         });
       },
-      // Sniper Galerie : lot de cartes à part des cibles habituelles (achat sous le marché, revente avec profit) ; renvoie le nombre de cartes
+      // Sniper Galerie : lot de cartes à part des cibles habituelles (achat sous le marché, revente au prix du marché) ; renvoie le nombre de cartes
       snipeBatch(name, defIds) {
         const cards = [];
         const filters = [];

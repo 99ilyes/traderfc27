@@ -480,7 +480,7 @@
       this.log(`${p.name} obtenu par snipe pour la Galerie`, 'buy');
       return true;
     }
-    // Carte du sniper Galerie (lot) : coût suivi comme un achat direct Galerie (revente au prix d'achat, taxe = coût)
+    // Carte du sniper Galerie (lot) : coût suivi comme un achat direct Galerie (revente au prix du marché, jamais sous le prix payé)
     onGallerySnipe(id, defId, name, price, sell, kept, listed) {
       this.addTotal('bought', 1);
       this.addTotal('spent', price);
@@ -951,6 +951,8 @@
             }
             return this.stopRequested ? undefined : this.giveUp(e, 'nocoins', `crédits insuffisants pour ${fmtNum(it.buyNow)} (${fmtNum(X.coins())} disponibles)`);
           }
+          // Prix du marché après cet achat : un palier sous l'annonce suivante (revente Galerie jamais sous le prix payé)
+          e.market = X.priceDown(r.items.find((x) => x !== it && x.buyNow >= it.buyNow)?.buyNow || 0);
           const res = await this.buyAndList(it, e);
           if (res === 'stop' || res === 'ok') return;
           fails++;
