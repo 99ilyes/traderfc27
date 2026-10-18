@@ -38,12 +38,13 @@
         X.saveConfig(this.cfg);
         onUpdate();
       },
-      // Cibles : copie du sniper pendant qu'il tourne, sinon celles des réglages
+      // Cibles habituelles : copie du sniper pendant qu'il tourne dessus, sinon celles des réglages (lot Galerie à part)
+      live: () => sniper.running && sniper.task === 'snipe' && !sniper.batch,
       targets() {
-        return sniper.running && sniper.task === 'snipe' ? sniper.filters : X.parseFilters(this.cfg.snipeFilters);
+        return this.live() ? sniper.filters : X.parseFilters(this.cfg.snipeFilters);
       },
       editTargets(fn) {
-        const live = sniper.running && sniper.task === 'snipe';
+        const live = this.live();
         const list = live ? sniper.filters : X.parseFilters(this.cfg.snipeFilters);
         let active = live ? sniper.idx : this.cfg.activeFilter;
         active = fn(list, active) ?? active;
@@ -65,7 +66,7 @@
       removeTarget(id) {
         this.editTargets((list, active) => {
           const n = list.findIndex((f) => f.id === id);
-          if (n < 0 || (sniper.running && sniper.task === 'snipe' && n === active)) return active;
+          if (n < 0 || (this.live() && n === active)) return active;
           list.splice(n, 1);
           return n < active ? active - 1 : active;
         });
@@ -74,31 +75,11 @@
         if (!sniper.running) this.setConfig({ activeFilter: n });
       },
       patchTarget(id, patch) {
-        if (sniper.running && sniper.task === 'snipe') return;
+        if (this.live()) return;
         this.editTargets((list) => {
           const f = list.find((x) => x.id === id);
           if (f) Object.assign(f, patch);
         });
-      },
-      // Cartes manquantes de la Galerie ajoutées aux cibles du sniper ; renvoie le nombre ajouté
-      addAlbumTargets(defIds) {
-        let added = 0;
-        this.editTargets((list) => {
-          const have = new Set(list.filter((f) => f.defId && !f.criteria).map((f) => Number(f.defId)));
-          for (const id of defIds.map(Number)) {
-            const p = album.findPlayer(id);
-            if (!p || album.isCollected(id) || have.has(id)) continue;
-            list.push(this.newTarget({ label: `${p.name}${p.rating ? ` ${p.rating}` : ''}`, defId: id, criteria: null, album: true }));
-            have.add(id);
-            added++;
-          }
-        });
-        if (added) album.log(`${added} carte(s) Galerie ajoutée(s) aux cibles du sniper`);
-        return added;
-      },
-      removeAlbumTarget(defId) {
-        const f = this.targets().find((x) => x.album && Number(x.defId) === Number(defId));
-        if (f) this.removeTarget(f.id);
       },
       clearAlbumTargets() {
         if (sniper.running) return;
@@ -108,14 +89,24 @@
           return 0;
         });
       },
-      // « Sniper » depuis la Galerie : cibles ajoutées, alternance activée s'il y en a plusieurs, sniper lancé
-      snipeSelection(defIds) {
-        this.addAlbumTargets(defIds);
-        for (const id of defIds) album.setSelected(id, false);
-        album.touch();
-        if (this.targets().length > 1 && !this.cfg.rotate) this.setConfig({ rotate: true });
-        ui.show('snipe');
-        if (!sniper.running) this.startSniper();
+      // Sniper Galerie : lot de cartes à part des cibles habituelles (achat sous le marché, revente avec profit) ; renvoie le nombre de cartes
+      snipeBatch(name, defIds) {
+        const cards = [];
+        const filters = [];
+        for (const id of [...new Set(defIds.map(Number))]) {
+          const p = album.findPlayer(id);
+          if (!p || album.isCollected(id)) continue;
+          const label = `${p.name}${p.rating ? ` ${p.rating}` : ''}`;
+          cards.push({ defId: id, label });
+          filters.push(this.newTarget({ label, defId: id, criteria: null, album: true }));
+        }
+        if (!filters.length) return 0;
+        X.unlockAudio();
+        void sniper.startBatch(name, cards, filters);
+        return filters.length;
+      },
+      stopBatch() {
+        sniper.stopBatch();
       },
       startSniper() {
         X.unlockAudio();

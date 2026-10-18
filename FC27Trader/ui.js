@@ -515,7 +515,7 @@
       if (s.running && s.task === 'relist') return `Relister · ${s.relistProgress ? `${s.relistProgress.done} / ${s.relistProgress.total} · ` : ''}${s.activity}`;
       if (s.running) {
         if (s.breakUntil) return `Sniper en pause · reprise dans ${fmtClock(s.breakUntil - now)}`;
-        return `Sniper · ${s.activity || 'démarrage'}`;
+        return `Sniper${s.batch ? ` Galerie (${s.batch.name})` : ''} · ${s.activity || 'démarrage'}`;
       }
       if (lockAt) return `Pause anti-captcha jusqu'à ${hm(lockAt)}${a.resumeAt || s.on ? ', reprise automatique' : ''}`;
       if (a.resumeAt) return `Achats Galerie : reprise vers ${hm(a.resumeAt)}`;
@@ -721,8 +721,8 @@
       const f = snipe ? s.filter : this.app.targets()[cfg.activeFilter];
       this.sPhase.textContent = snipe ? (locked ? 'PAUSE ANTI-CAPTCHA' : PHASES[s.phase]) : s.running ? 'RELISTER' : this.album.running ? 'SUSPENDU (GALERIE)' : s.on ? 'REPRISE IMMINENTE' : 'À L’ARRÊT';
       this.sSpin.className = `s-spin${!s.running ? ' off' : s.phase === 'break' || s.phase === 'wait' ? ' pause' : ''}`;
-      const rot = snipe && cfg.rotate && s.filters.length > 1 ? ` · changement de cible dans ${Math.max(0, s.rotateAt - s.run.searches)} recherches` : '';
-      this.sTarget.replaceChildren(f ? h('span', {}, h('b', { textContent: f.label }), f.buyPrice ? ` · achat ≤ ${fmt(f.buyPrice)} · vente ${fmt(f.sellPrice)}` : '', rot) : 'Aucune cible');
+      const rot = snipe && s.rotating ? ` · changement de cible dans ${Math.max(0, s.rotateAt - s.run.searches)} recherches` : '';
+      this.sTarget.replaceChildren(f ? h('span', {}, snipe && s.batch ? `Sniper Galerie « ${s.batch.name} » · ` : '', h('b', { textContent: f.label }), f.buyPrice ? ` · achat ≤ ${fmt(f.buyPrice)} · vente ${fmt(f.sellPrice)}` : '', rot) : 'Aucune cible');
       const c = s.stats.current;
       const pause = s.breakUntil ? `pause encore ${fmtClock(s.breakUntil - now)}` : s.breakAt ? `pause dans ${fmtClock(s.breakAt - now)}` : X.BREAK_PRESETS[cfg.breakPreset]?.every ? '' : 'sans pause';
       const cp = c ? (s.pendingBy((x) => x.sid).get(c.id) ?? { count: 0, expected: 0 }) : null;
@@ -1034,7 +1034,7 @@
             h('div', { className: 'a-cta-sub', style: 'color:#fff;font-size:.82rem', textContent: `Achetés ${bought} · mis en vente ${listed} · échecs ${failed}${skipped.length ? ` · sautés ${skipped.length}` : ''}${open ? ' · arrêté avant la fin' : ''}` }),
             skipped.length ? btn(`Racheter ${skipped.length} carte(s) sautée(s) au prix vu`, () => void a.retrySkipped(), 'big primary') : null,
             open ? btn(`Reprendre (${open} restante(s))`, () => void a.runQueue(), 'big primary') : null,
-            missing.length ? btn(`🎯 Sniper les ${missing.length} carte(s) non achetée(s)`, () => (this.closeBuy(), this.app.snipeSelection(missing)), 'big') : null,
+            missing.length ? btn(`🎯 Sniper les ${missing.length} carte(s) non achetée(s)`, () => (this.closeBuy(), X.gallery.snipe(sets.map((x) => x.name).join(', '), missing)), 'big') : null,
             btn('Terminé', () => this.closeBuy(), `big${skipped.length || open ? '' : ' primary'}`),
           ].filter(Boolean),
         );

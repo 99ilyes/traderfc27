@@ -11,6 +11,7 @@
   const K_BREAK = `${NS}:break`;
   const K_SALES = `${NS}:sales`;
   const K_COUNTED = `${NS}:counted`;
+  const K_BATCH = `${NS}:galleryBatch`;
   const FRESH_MS = 31e3;
   const MAX_ERRORS = 3;
   const MISTAKE = 15;
@@ -91,6 +92,8 @@
     tooManyNoted = false;
     albumDone = false;
     nextPileAt = 0;
+    // Sniper Galerie (popup de la vue Galerie) : lot de cartes à part des cibles habituelles, { name, cards, filters, idx, prevOn, at }
+    batch = load(K_BATCH, null);
 
     // hooks : { onSnipe(defId, raw), isCollected(defId), albumSold(item), albumPrice(id), albumOnSale(), onListed(id, price), otherBusy(), afterTask() }
     constructor(getConfig, onUpdate, patchConfig, hooks) {
@@ -144,7 +147,8 @@
         sales: this.sales.slice(0, 20),
         breakAt: this.breakAt,
         breakUntil: this.breakUntil,
-        rotationIn: this.running && this.task === 'snipe' && this.cfg.rotate && this.filters.length > 1 ? Math.max(0, this.rotateAt - this.run.searches) : null,
+        batch: this.batch ? { name: this.batch.name, left: this.batch.filters.length, total: this.batch.cards.length } : null,
+        rotationIn: this.running && this.task === 'snipe' && this.rotating ? Math.max(0, this.rotateAt - this.run.searches) : null,
         lockedUntil: this.guard.lockedUntil(),
         limits: this.guard.limits(),
         searchLog: this.searchLog,
@@ -216,12 +220,14 @@
       if (this.running) return;
       this.setOn(true);
       if (this.hooks.otherBusy()) return this.note('Sniper : démarrage à la fin de la tâche Galerie en cours');
-      this.filters = X.parseFilters(this.cfg.snipeFilters);
+      this.batch = load(K_BATCH, null);
+      if (this.batch && !this.batch.filters?.length) this.endBatch('aucune carte');
+      this.filters = this.batch ? this.batch.filters : X.parseFilters(this.cfg.snipeFilters);
       if (!this.filters.length) {
         this.setOn(false);
         return this.note('Aucune cible : ajouter un joueur, le filtre de la Web App ou des cartes de la Galerie', 'error');
       }
-      this.idx = Math.min(Math.max(0, this.cfg.activeFilter), this.filters.length - 1);
+      this.idx = Math.min(Math.max(0, this.batch ? (this.batch.idx ?? 0) : this.cfg.activeFilter), this.filters.length - 1);
       this.running = true;
       this.task = 'snipe';
       this.stopRequested = false;
@@ -235,8 +241,9 @@
       const resumed = this.stats.current;
       const cur = this.stats.begin();
       if (resumed && resumed !== cur) this.note('Plus de 30 min d’interruption : nouvelle session de suivi');
-      this.note(`Sniper : démarrage${this.cfg.rotate ? ', alternance des cibles' : ''}`);
-      if (this.cfg.rotate && this.filters.length < 2) this.note('Une seule cible : en ajouter une 2e pour alterner toutes les 450 à 900 recherches');
+      if (this.batch) this.note(`Sniper Galerie « ${this.batch.name} » : ${this.filters.length} carte(s) à sniper, alternance des cartes`);
+      else this.note(`Sniper : démarrage${this.cfg.rotate ? ', alternance des cibles' : ''}`);
+      if (!this.batch && this.cfg.rotate && this.filters.length < 2) this.note('Une seule cible : en ajouter une 2e pour alterner toutes les 450 à 900 recherches');
       let retries = 0;
       let lastErr = 0;
       try {
@@ -366,6 +373,7 @@
     // byUser : le sniper ne reprend plus seul ; sinon (tâche Galerie) il reprend ensuite
     stop(msg = 'Arrêt demandé', byUser = true) {
       if (byUser) {
+        if (this.batch) this.clearBatch();
         this.setOn(false);
         if (this.reloadTimer) {
           clearTimeout(this.reloadTimer);
@@ -381,6 +389,36 @@
       this.stopRequested = true;
       this.wake?.();
       this.note(msg);
+    }
+    get rotating() {
+      return (this.cfg.rotate || !!this.batch) && this.filters.length > 1;
+    }
+    // Lot Galerie lancé depuis la vue Galerie : sniper habituel suspendu, repris à la fin du lot s'il tournait
+    async startBatch(name, cards, filters) {
+      const prevOn = this.batch ? this.batch.prevOn : this.on;
+      this.batch = { name, cards, filters, idx: 0, prevOn, at: Date.now() };
+      save(K_BATCH, this.batch);
+      if (this.running) await this.suspend(`Sniper : cibles habituelles suspendues pour le sniper Galerie « ${name} »`);
+      if (!this.running) void this.start();
+    }
+    // Fin du lot : cibles habituelles reprises si le sniper tournait avant
+    stopBatch(why = 'arrêté') {
+      if (!this.batch) return;
+      this.endBatch(why);
+      if (this.running) this.stop('Sniper Galerie : arrêt demandé', false);
+      else this.hooks.afterTask();
+    }
+    endBatch(why) {
+      const b = this.batch;
+      if (!b) return;
+      this.clearBatch();
+      this.setOn(!!b.prevOn);
+      this.note(`Sniper Galerie « ${b.name} » terminé (${why})${b.prevOn ? ' : reprise des cibles habituelles' : ''}`);
+    }
+    clearBatch() {
+      this.lastBatch = this.batch ? { ...this.batch, endedAt: Date.now() } : this.lastBatch;
+      this.batch = null;
+      save(K_BATCH, null);
     }
     // Arrêt le temps d'une tâche Galerie (achat en vol terminé avant)
     async suspend(why) {
@@ -556,7 +594,7 @@
           sinceCheck = 0;
           win = { n: 0, start: Date.now() };
         }
-        if (cfg.rotate && this.filters.length > 1 && this.run.searches >= this.rotateAt) {
+        if (this.rotating && this.run.searches >= this.rotateAt) {
           this.idx = (this.idx + 1) % this.filters.length;
           this.saveFilters();
           this.note(`Changement de cible : ${this.filter.label}`);
@@ -673,7 +711,10 @@
       return Math.max(1, Math.min(max, bids, room));
     }
     saveFilters() {
-      this.patchConfig({ snipeFilters: JSON.stringify(this.filters), activeFilter: this.idx });
+      if (!this.batch) return this.patchConfig({ snipeFilters: JSON.stringify(this.filters), activeFilter: this.idx });
+      this.batch = { ...this.batch, filters: this.filters, idx: this.idx };
+      save(K_BATCH, this.batch);
+      this.emit();
     }
     // Retire la cible n ; false s'il n'en reste aucune
     dropFilter(n, why) {
@@ -682,6 +723,7 @@
       if (this.idx >= this.filters.length) this.idx = 0;
       this.saveFilters();
       if (this.filters.length) return true;
+      if (this.batch) return this.endBatch('toutes les cartes du lot obtenues'), false;
       this.setOn(false);
       this.note('Plus aucune cible : sniper arrêté');
       return false;

@@ -126,6 +126,26 @@
     'firstOwner.usePercent': 'Supposer %',
     'firstOwner.mode': 'Premier propriétaire',
     noSearch: 'Recherche indisponible',
+    'snipe.running': '🎯 Sniper Galerie en cours (voir)',
+    'snipe.none': 'Aucune carte à sniper : toutes déjà dans la Galerie.',
+    'snipe.title': 'Sniper Galerie · {name}',
+    'snipe.sub': 'Achat sous le prix du marché, revente 1 h avec profit, jamais sous le prix d’achat taxe comprise (mêmes prix que le sniper). Les cartes alternent ; une carte obtenue est retirée du lot. Tes cibles habituelles ne sont pas touchées et reprennent à la fin si le sniper tournait.',
+    'snipe.starting': 'Démarrage…',
+    'snipe.suspended': 'Suspendu pendant une tâche Galerie (achats, lecture des joueurs), reprise ensuite',
+    'snipe.locked': 'Pause anti-captcha, reprise automatique',
+    'snipe.done': 'Terminé : {n} / {total} carte(s) obtenue(s)',
+    'snipe.target': 'Cible : {name}',
+    'snipe.prices': ' · achat ≤ {buy} · vente {sell}',
+    'snipe.stats': '{snipes} snipée(s) · profit attendu {profit} crédits',
+    'snipe.rowTarget': 'Ciblée',
+    'snipe.rowWait': 'En attente',
+    'snipe.rowGot': 'Obtenue',
+    'snipe.rowOut': 'Retirée',
+    'snipe.sniped': 'snipée à {price}',
+    'snipe.listed': ' · en vente à {price}',
+    'snipe.stop': 'Arrêter le sniper Galerie',
+    'snipe.close': 'Fermer',
+    'snipe.closeHint': 'Le sniper Galerie continue en arrière-plan (bandeau du panneau FC27 Trader).',
   };
   const t = (k, vars) => {
     let s = STR[k] ?? k;
@@ -1018,7 +1038,7 @@
   }
 
   // Cartes du set ajoutées à sa liste (achat direct, sniper) avec leur prix connu
-  function adoptCards(set, items) {
+  function adoptCards(set, items, select = true) {
     const a = album();
     const s = a.sets[set.key];
     if (!s) return [];
@@ -1036,11 +1056,84 @@
         s.players[d] = { defId: d, name: String(name || it.name || d).slice(0, 60), rating: at.r || 0, minPrice: priceOf(it), rareflag: at.f, l: at.l || 0, c: at.c || 0, n: at.n || 0, collected: false, kept: true };
       }
       const pr = priceOf(it);
-      a.setSelected(d, true, pr >= 150 ? pr : 0);
+      if (select) a.setSelected(d, true, pr >= 150 ? pr : 0);
       ids.push(d);
     }
     a.saveSets();
     return ids;
+  }
+
+  // ---------- Sniper Galerie : lot de cartes snipées puis revendues, suivi dans une fenêtre ----------
+
+  let snipeDlg = null;
+  function snipe(name, defIds) {
+    const n = X.app?.snipeBatch(name, defIds) ?? 0;
+    if (!n) return void UI.toast(t('snipe.none'), 1);
+    openSnipeDialog();
+  }
+  function openSnipeDialog() {
+    if (snipeDlg) return snipeDlg.render();
+    const layer = UI.el('div', 'fc27g-modal');
+    const box = UI.el('div', 'fc27g-modal-box fc27g-snipe');
+    layer.appendChild(box);
+    document.body.appendChild(layer);
+    let timer = 0;
+    const close = () => {
+      clearInterval(timer);
+      layer.remove();
+      snipeDlg = null;
+    };
+    layer.addEventListener('click', (e) => e.target === layer && close());
+    const render = () => {
+      const s = X.app?.sniper;
+      const a = album();
+      const b = s?.batch ?? s?.lastBatch;
+      if (!s || !b) return close();
+      const active = s.batch === b;
+      const left = new Set(active ? b.filters.map((f) => Number(f.defId)) : []);
+      const mine = Object.values(s.snipes).filter((x) => x.at >= b.at && b.cards.some((c) => c.defId === Number(x.defId)));
+      const cur = active && s.running && s.task === 'snipe' ? s.filter : null;
+      let status;
+      if (!active) status = t('snipe.done', { n: b.cards.filter((c) => !left.has(c.defId) && a.isCollected(c.defId)).length, total: b.cards.length });
+      else if (s.guard.lockedUntil() > 0) status = t('snipe.locked');
+      else if (s.running && s.task === 'snipe') status = s.activity || t('snipe.starting');
+      else if (a.running) status = t('snipe.suspended');
+      else status = t('snipe.starting');
+      const profit = mine.reduce((sum, x) => sum + (x.listPrice ? X.profitOf(x.price, x.listPrice) : 0), 0);
+      const rows = b.cards.map((c) => {
+        const got = mine.filter((x) => Number(x.defId) === c.defId);
+        const isCur = cur && Number(cur.defId) === c.defId;
+        const done = !left.has(c.defId) && (got.length || a.isCollected(c.defId));
+        const [txt, cls] = isCur ? [t('snipe.rowTarget'), 'is-target'] : done ? [t('snipe.rowGot'), 'is-done'] : left.has(c.defId) ? [t('snipe.rowWait'), ''] : [t('snipe.rowOut'), 'is-out'];
+        const detail = got.map((x) => t('snipe.sniped', { price: num(x.price) }) + (x.listPrice ? t('snipe.listed', { price: num(x.listPrice) }) : '')).join(' ; ');
+        const r = UI.el('div', `fc27g-snipe-row ${cls}`);
+        r.append(UI.el('span', 'fc27g-snipe-name', c.label), UI.el('span', 'fc27g-snipe-detail', detail), UI.el('span', 'fc27g-snipe-state', txt));
+        return r;
+      });
+      const actions = UI.el('div', 'fc27g-modal-actions');
+      if (active) actions.append(UI.button({ variant: 'danger', label: t('snipe.stop'), onTap: () => (X.app.stopBatch(), render()) }));
+      actions.append(UI.button({ variant: active ? 'secondary' : 'primary', label: t('snipe.close'), onTap: close }));
+      const list = UI.el('div', 'fc27g-snipe-rows');
+      box.replaceChildren(
+        ...[
+        UI.el('h3', 'fc27g-modal-title', t('snipe.title', { name: b.name })),
+        UI.el('p', 'fc27g-modal-text', t('snipe.sub')),
+        UI.el('div', 'fc27g-snipe-status', status),
+        cur ? UI.el('div', 'fc27g-snipe-target', t('snipe.target', { name: cur.label }) + (cur.buyPrice ? t('snipe.prices', { buy: num(cur.buyPrice), sell: num(cur.sellPrice) }) : '')) : null,
+        UI.el('div', 'fc27g-snipe-stats', t('snipe.stats', { snipes: mine.length, profit: num(profit) })),
+        list,
+        actions,
+        active ? UI.el('p', 'fc27g-snipe-hint', t('snipe.closeHint')) : null,
+        ].filter(Boolean),
+      );
+      const top = snipeDlg?.scroll ?? 0;
+      list.append(...rows);
+      list.scrollTop = top;
+      list.onscroll = () => snipeDlg && (snipeDlg.scroll = list.scrollTop);
+    };
+    snipeDlg = { render, close, scroll: 0 };
+    timer = setInterval(render, 1e3);
+    render();
   }
 
   // ---------- Petits composants d'interface ----------
@@ -1827,10 +1920,11 @@
       buy.classList.add('fc27g-gallery-buy');
       if (!buys.length) buy.classList.add('disabled');
       P.appendChild(buy);
-      const snipe = UI.button({ label: t('snipeMissing', { n: buys.length }), onTap: () => this._snipeMissing(buys) });
-      snipe.classList.add('fc27g-gallery-buy');
-      if (!buys.length) snipe.classList.add('disabled');
-      P.appendChild(snipe);
+      const running = X.app?.sniper?.batch?.name === set.name;
+      const snipeBtn = UI.button({ label: running ? t('snipe.running') : t('snipeMissing', { n: buys.length }), onTap: () => (running ? openSnipeDialog() : this._snipeMissing(buys)) });
+      snipeBtn.classList.add('fc27g-gallery-buy');
+      if (!running && !buys.length) snipeBtn.classList.add('disabled');
+      P.appendChild(snipeBtn);
       const as = assume();
       P.appendChild(UI.el('p', 'fc27g-gallery-panel-note', as.firstOwnerMode === 'marks' ? t('bonusNoteMarks') : as.firstOwnerPct > 0 ? t('bonusNoteAssumed', { pct: as.firstOwnerPct }) : t('bonusNoteTags')));
       this._refreshCeiling();
@@ -2021,8 +2115,9 @@
     };
     V._snipeMissing = function (items) {
       if (!items?.length) return;
-      const ids = adoptCards(this._set, items);
-      if (ids.length) X.app?.snipeSelection(ids);
+      const ids = adoptCards(this._set, items, false);
+      if (ids.length) snipe(this._set.name, ids);
+      this._refreshPanel();
     };
     // Retour sur la vue : cartes achetées depuis (achat direct, sniper, marché) comptées comme collectées
     V._recheck = async function () {
@@ -2284,5 +2379,6 @@
     progress: loadProgress,
     overview: () => overview(gallerySets(), loadProgress()),
     categoryLabel,
+    snipe,
   };
 })();
