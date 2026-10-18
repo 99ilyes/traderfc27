@@ -185,14 +185,16 @@
     app.sniper = sniper;
     app.album = album;
     ui = new X.UI(app);
+    app.ui = ui;
     X.app = app;
+    X.gallery.install();
 
     const n = album.setList().length;
     album.log(`${X.APP} prêt${n ? ` (${n} set${n > 1 ? 's' : ''} Galerie)` : ''}`);
     if (n) setTimeout(() => !album.running && void album.syncGallery(), 5e3);
-    // Lecture fut.gg enrichie (joueurs requis, seuils de grade) : catalogue relu une fois après la mise à jour
-    if (Number(load(`${NS}:parseV`, 0)) < 2) {
-      save(`${NS}:parseV`, 2);
+    // Lecture fut.gg enrichie (joueurs requis, seuils et jetons de grade) : catalogue relu une fois après la mise à jour
+    if (Number(load(`${NS}:parseV`, 0)) < 3) {
+      save(`${NS}:parseV`, 3);
       if (n) album.requestCatalog(true);
     } else if (app.cfg.autoCatalog) album.requestCatalog(false);
     // Suivi des cartes Galerie recalé sur la vraie liste de transferts au démarrage
@@ -230,6 +232,7 @@
       else if (cmd.type === 'rotate') app.setConfig({ rotate: !!cmd.on });
       else if (cmd.type === 'toggle-panel') ui.toggle();
       else if (cmd.type === 'relist') app.relist();
+      else if (cmd.type === 'prices') X.gallery.onPrices(cmd);
       else if (cmd.type === 'catalog-progress') album.catalogStatus({ busy: true, text: `Catalogue fut.gg : ${cmd.text}` });
       else if (cmd.type === 'catalog-fresh') album.catalogStatus({ busy: false, text: '', at: Number(cmd.at) || album.catalog.at });
       else if (cmd.type === 'catalog-error') {
@@ -241,10 +244,7 @@
       } else if (cmd.type === 'import' && Number(cmd.data?.at) > Number(load(X.ALBUM_KEYS.K_IMPORT_AT, 0))) {
         save(X.ALBUM_KEYS.K_IMPORT_AT, Number(cmd.data.at));
         const key = album.importSet(cmd.data);
-        if (key) {
-          ui.show('gallery');
-          ui.openSet(key);
-        }
+        if (key && !X.gallery.open(key)) ui.show('gallery');
       }
     };
     pendingCmds.splice(0).forEach(onCommand);

@@ -114,6 +114,22 @@ globalThis.AlbumFutgg = (() => {
     const v = Object.values(out);
     return v.every((x, i) => Number.isFinite(x) && x > 0 && (!i || x > v[i - 1])) ? out : null;
   }
+  // Jetons de chaque grade (« 2 Tokens » / « 2 jetons » après le seuil du grade), si la page les affiche ; sinon null
+  function tokens(doc) {
+    const t = pageText(doc);
+    const at = t.search(/grade requirements?/i);
+    if (at < 0) return null;
+    const sec = t.slice(at, at + 4e3);
+    const out = {};
+    const re = /(?:^|[^A-Za-z])([DCBAS])(?![A-Za-z])([^]*?)(?=(?:[^A-Za-z][DCBAS](?![A-Za-z]))|$)/g;
+    for (let m = re.exec(sec); m; m = re.exec(sec)) {
+      if (out[m[1]] !== undefined) continue;
+      const k = m[2].slice(0, 80).match(/(\d{1,2})\s*(?:gallery\s+)?(?:tokens?|jetons?)\b/i);
+      if (k) out[m[1]] = Number(k[1]);
+      if (Object.keys(out).length === 5) break;
+    }
+    return Object.keys(out).length ? out : null;
+  }
 
   // Liens fut.gg de la page qui vérifient re (pathname), sans doublon
   function links(doc, re) {
@@ -139,7 +155,7 @@ globalThis.AlbumFutgg = (() => {
   // Même format que l'envoi depuis la page fut.gg (commande « import » du panneau)
   function setData(doc, url, list) {
     const path = new URL(url).pathname;
-    return { at: Date.now(), slug: path.match(GALLERY_RE)?.[1] ?? 'set', name: setName(doc, path), url, needed: needed(doc), grades: grades(doc), players: list };
+    return { at: Date.now(), slug: path.match(GALLERY_RE)?.[1] ?? 'set', name: setName(doc, path), url, needed: needed(doc), grades: grades(doc), tokens: tokens(doc), players: list };
   }
 
   return {
