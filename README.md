@@ -28,8 +28,10 @@ Hésitations : 8 % des recherches, +0,5 à 1,5 s (au lieu de +1 à 4 s).
 
 1. Onglet Galerie > **+ Importer depuis fut.gg** : ouvre la Galerie fut.gg.
 2. Sur fut.gg, bouton **Envoyer à FC27 Trader** (bas à droite) :
-   - page d'un **set** : tous ses joueurs (pages suivantes du set comprises), avec prix fut.gg et nombre de cartes requises ;
+   - page d'un **set** : tous ses joueurs (pages suivantes du set comprises) et le nombre de cartes requises ;
    - page d'un **joueur** : la carte de l'adresse, ajoutée au set « Joueurs fut.gg » et déjà sélectionnée pour l'achat.
+
+   Prix de base : prix fut.gg actuel lu à l'envoi par l'API de prix du site (`/api/fut/player-prices/27/`, lots de 50), sinon prix affiché sur la page ; il sert de prix de départ de l'achat (modifiable). Sans prix : 4e annonce la moins chère du marché, sondée avant l'achat.
    Autant d'envois que voulu, importés dans l'ordre à l'ouverture de la Web App (ou tout de suite si elle est ouverte). Renvoyer un set le met à jour.
 3. Dans le panneau : ouvrir un set, sélectionner les joueurs manquants (statut collecté lu chez EA ; joueurs déjà dans la Galerie ignorés). « × » retire un set, ou un joueur du set « Joueurs fut.gg ».
 4. **Acheter** (sur un set) ou **Acheter la sélection** (tous les sets) : fenêtre d'achat (prix de départ modifiable, résumé coût / revente / taxe, écart max), puis lancement.
@@ -57,5 +59,5 @@ Suivi détaillé du sniper (bouton « Réinitialiser » commun) :
 ## Limites connues
 
 - Testé sur une Web App simulée uniquement (moteurs, suspension et reprise, ventes, relist, pause captcha).
-- Import fut.gg dépendant de la mise en page de fut.gg (liens `/players/…/27-<defId>`, prix à côté de l'icône crédit).
+- Import fut.gg dépendant de la mise en page de fut.gg (liens `/players/…/27-<defId>`, prix à côté de l'icône crédit) ; API de prix fut.gg non documentée, format lu défensivement (non vérifié sur le vrai site).
 - L'automatisation de la Web App est contraire aux conditions d'EA : risque de restriction du marché ou du compte.
