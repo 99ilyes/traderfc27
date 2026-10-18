@@ -18,7 +18,6 @@
   const SEARCHLOG = 100;
   const SALES = 50;
   const PRUNE_MS = 6e5;
-  const ROTATE = [450, 900];
   const BLOCKED_WAIT = [48e4, 72e4];
   const ERROR_WAIT = [24e4, 36e4];
   const MAX_RETRIES = 5;
@@ -78,6 +77,7 @@
     brk = { ...BREAK0, ...load(K_BREAK, {}) };
     segStart = 0;
     rotateAt = 0;
+    rotateKey = '';
     snipes = load(K_SNIPES, {});
     prices = {};
     seen = new Set();
@@ -128,6 +128,7 @@
         task: this.running ? this.task : null,
         on: this.on,
         rotate: this.cfg.rotate,
+        rotateInfo: X.rotateInfo(this.cfg.rotateEvery),
         relist: this.relistProgress,
         phase: this.phase,
         activity: this.activity,
@@ -236,7 +237,7 @@
       const cur = this.stats.begin();
       if (resumed && resumed !== cur) this.note('Plus de 30 min d’interruption : nouvelle session de suivi');
       this.note(`Sniper : démarrage${this.cfg.rotate ? ', alternance des cibles' : ''}`);
-      if (this.cfg.rotate && this.filters.length < 2) this.note('Une seule cible : en ajouter une 2e pour alterner toutes les 450 à 900 recherches');
+      if (this.cfg.rotate && this.filters.length < 2) this.note(`Une seule cible : en ajouter une 2e pour alterner toutes les ${X.rotateInfo(this.cfg.rotateEvery)}`);
       let retries = 0;
       let lastErr = 0;
       try {
@@ -382,6 +383,10 @@
       this.wake?.();
       this.note(msg);
     }
+    newRotateAt() {
+      this.rotateKey = this.cfg.rotateEvery;
+      this.rotateAt = this.run.searches + randInt(...(X.ROTATE_PRESETS[this.rotateKey] ?? X.ROTATE_PRESETS.safe).range);
+    }
     get rotating() {
       return this.cfg.rotate && this.filters.length > 1;
     }
@@ -515,7 +520,7 @@
       if (!(await this.prepareFilter())) return;
       let key = this.breakKey();
       await this.restoreBreakClock(key);
-      this.rotateAt = this.run.searches + randInt(...ROTATE);
+      this.newRotateAt();
       let win = { n: 0, start: Date.now() };
       let sinceCheck = 0;
       let errors = 0;
@@ -555,16 +560,17 @@
           this.albumDone = false;
           if (!this.dropFilter(this.idx, 'carte obtenue pour la Galerie')) return;
           if (!(await this.prepareFilter())) return;
-          this.rotateAt = this.run.searches + randInt(...ROTATE);
+          this.newRotateAt();
           sinceCheck = 0;
           win = { n: 0, start: Date.now() };
         }
+        if (this.rotateKey !== cfg.rotateEvery) this.newRotateAt();
         if (this.rotating && this.run.searches >= this.rotateAt) {
           this.idx = (this.idx + 1) % this.filters.length;
           this.saveFilters();
           this.note(`Changement de cible : ${this.filter.label}`);
           if (!(await this.prepareFilter())) return;
-          this.rotateAt = this.run.searches + randInt(...ROTATE);
+          this.newRotateAt();
           sinceCheck = 0;
           win = { n: 0, start: Date.now() };
         }

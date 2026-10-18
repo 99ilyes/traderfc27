@@ -727,12 +727,15 @@
           this.pricesEl.replaceChildren(ptitle, cfg.sellAfterSnipe ? h('div', { className: 'prices' }, 'Achat', num('buyPrice'), 'Vente', num('sellPrice')) : h('div', { className: 'prices' }, 'Achat', num('buyPrice')), line);
         }
       }
+      const every = h('select', { className: 'a-in', disabled: !cfg.rotate }, ...Object.entries(X.ROTATE_PRESETS).map(([v, p]) => h('option', { value: v, textContent: `${p.label} : ${p.info}`, selected: cfg.rotateEvery === v })));
+      every.onchange = () => (this.app.setConfig({ rotateEvery: every.value }), this.renderSnipe());
       this.sRotate.replaceChildren(
         setting(
           'Alterner les cibles',
-          list.length > 1 ? 'Change de cible toutes les 450 à 900 recherches' : 'Ajoute au moins 2 cibles pour alterner',
+          list.length > 1 ? `Change de cible toutes les ${X.rotateInfo(cfg.rotateEvery)}` : 'Ajoute au moins 2 cibles pour alterner',
           toggle(cfg.rotate, (v) => this.app.setConfig({ rotate: v })),
         ),
+        setting('Recherches avant de changer de cible', 'Tiré au hasard dans la fourchette à chaque changement', every),
       );
       // Après un snipe
       const seg = h(
@@ -1553,7 +1556,7 @@
       this.renderStrip();
       const a = this.album;
       const s = this.sniper;
-      const sig = `${a.mode}|${a.version}|${s.running}|${s.task}|${s.idx}|${this.cfg.snipeFilters}|${this.cfg.rotate}`;
+      const sig = `${a.mode}|${a.version}|${s.running}|${s.task}|${s.idx}|${this.cfg.snipeFilters}|${this.cfg.rotate}|${this.cfg.rotateEvery}`;
       if (sig !== this.lastSig && !this.typing()) {
         this.lastSig = sig;
         if (this.tab === 'gallery' || this.tab === 'snipe') this.renderBody();
