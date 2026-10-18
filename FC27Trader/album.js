@@ -472,11 +472,13 @@
 
     // Carte snipée : comptée pour la Galerie si elle manquait ; true si c'était une carte manquante
     onSnipe(defId, raw) {
+      // Manquante avant ce snipe ? (lu avant l'ajout à la collection, sinon toujours « déjà collectée »)
+      const p = this.findPlayer(defId);
+      const missing = !!p && !this.refreshCollected(p).collected;
       // Toute carte snipée passe au club : comptée dans la collection Galerie
       this.addOwned(defId, X.attrsFrom(raw));
       this.saveColl();
-      const p = this.findPlayer(defId);
-      if (!p || this.refreshCollected(p).collected) return false;
+      if (!missing) return false;
       this.markCollected(defId);
       this.setSelected(defId, false);
       this.log(`${p.name} obtenu par snipe pour la Galerie`, 'buy');

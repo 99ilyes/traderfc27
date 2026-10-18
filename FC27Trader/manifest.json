@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "FC27 Trader",
-  "version": "1.5.4",
+  "version": "1.5.5",
   "description": "Web App FC 27 : sniper qui tourne sans interruption pour gagner des crédits, et Galerie (vue intégrée à la Web App : score EA par carte, grades, plan le moins cher par grade, catalogue fut.gg).",
   "action": {
     "default_popup": "popup.html",

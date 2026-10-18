@@ -592,7 +592,9 @@
           win = { n: 0, start: Date.now() };
         }
         // Cible Galerie achetée : retirée, cible suivante
-        if (this.albumDone) {
+        // Sécurité lot Galerie : carte déjà obtenue pendant ce lot, jamais rachetée
+        const gotIt = this.batch && this.filter?.album && (this.batch.got ?? []).some((g) => Number(g.defId) === Number(this.filter.defId));
+        if (this.albumDone || gotIt) {
           this.albumDone = false;
           if (!this.dropFilter(this.idx, 'carte obtenue pour la Galerie')) return;
           if (!(await this.prepareFilter())) return;
@@ -886,7 +888,9 @@
           }
           this.note(`Snipé ${name} à ${fmt(it.buyNow)} ! (${ageText(it.expires)}, réponse en ${ms} ms)`, 'snipe');
           if (this.cfg.snipeSound) X.beep();
-          if (defId && this.hooks.onSnipe(defId, it.raw) && this.filter.album && this.filter.defId === defId) this.albumDone = true;
+          if (defId) this.hooks.onSnipe(defId, it.raw);
+          // Cible Galerie obtenue : retirée avant la recherche suivante (une carte par joueur suffit)
+          if (this.filter.album && Number(this.filter.defId) === Number(defId)) this.albumDone = true;
           won.push(it);
         } else if (res.status === 401 || X.BAD_STATUS.has(res.status)) fatal ??= res.status;
         else if (X.MISS_STATUS.has(res.status)) {
