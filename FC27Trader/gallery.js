@@ -126,6 +126,30 @@
     'firstOwner.usePercent': 'Supposer %',
     'firstOwner.mode': 'Premier propriétaire',
     noSearch: 'Recherche indisponible',
+    'max.line': 'Max {grade} · {credits} crédits · taxe {tax}',
+    'max.lineKeep': 'Max {grade} · {credits} crédits (gardées au club)',
+    'max.reached': 'Max {grade} atteint',
+    'max.none': 'Aucun grade atteignable avec les cartes au prix connu',
+    'max.unsynced': 'Rang max : synchroniser le set',
+    'max.hint': '{buys} carte(s) à acheter pour le grade {grade}, la composition la moins chère. Crédits nécessaires : total des achats (avancés avant revente). Taxe : 5 % EA à la revente, coût réel pour la Galerie.{unpriced}',
+    'max.hintUnpriced': ' {n} carte(s) sans prix non prises en compte.',
+    'max.best': ' Avec toutes les cartes sorties : {grade}.',
+    'ov.max': 'Rang max par set',
+    'ov.maxNote': 'Grade le plus haut atteignable avec tes cartes collectées et les cartes au prix connu, au moindre coût. Crédits à avancer et taxe EA de 5 % payée à la revente. Touche un set pour l’ouvrir avec cette composition.',
+    'ov.maxRow': 'Max {grade}{cur}, {buys} à acheter',
+    'ov.maxCur': ' (actuel {grade})',
+    'ov.maxSide': '{credits} · taxe {tax}',
+    'ov.maxSideKeep': '{credits} (club)',
+    'ov.maxEmpty': 'Synchronise tout pour voir le rang max de chaque set.',
+    'ov.toMax': 'Tout au max',
+    'ov.toMaxValue': 'taxe {tax}',
+    'ov.toMaxHint': '{sets} set(s) : {credits} crédits à avancer (récupérés à la revente), taxe EA {tax} crédits. Un joueur commun à plusieurs sets est compté dans chacun.',
+    'panel.credits': 'Crédits nécessaires',
+    'panel.tax': 'Taxe (revente)',
+    'panel.keep': 'Coût (gardées au club)',
+    'panel.max': 'Rang max',
+    'panel.maxValue': '{grade} · {credits} cr · taxe {tax}',
+    'panel.maxValueKeep': '{grade} · {credits} cr',
     'snipe.running': '🎯 Sniper Galerie en cours (voir)',
     'snipe.none': 'Aucune carte à sniper : toutes déjà dans la Galerie.',
     'snipe.title': 'Sniper Galerie · {name}',
@@ -708,15 +732,36 @@
       reachable: true,
     };
   }
+  // Coût réel d'une carte achetée pour la Galerie : taxe EA à la revente (règle « Après achat »), prix entier si gardée au club
+  const taxOf = (price) => {
+    const cfg = X.app?.cfg ?? {};
+    if (!(price > 0)) return 0;
+    if (cfg.afterBuy === 'keep') return price;
+    return Math.max(0, price - X.net(X.galleryResale ? X.galleryResale(price, 0, cfg) || price : price));
+  };
+  const keepMode = () => X.app?.cfg?.afterBuy === 'keep';
+  // Rang max atteignable avec les cartes collectées et les cartes au prix connu : composition la moins chère, crédits à avancer, taxe
+  function maxPlan(set, pool, priceOfFn) {
+    const ladder = gradeFor(set, 0)?.ladder ?? [];
+    if (!ladder.length) return null;
+    const fill = gradeFill(pool, set, priceOfFn, ladder[ladder.length - 1].grade);
+    const unpriced = (Array.isArray(pool) ? pool : []).filter((e) => e && !e.isCollected && !priceOfFn(e)).length;
+    if (!fill || !fill.target) return { grade: null, credits: 0, tax: 0, buys: 0, unpriced };
+    const buys = fill.items.filter((e) => e && !e.isCollected);
+    const credits = buys.reduce((t, e) => t + priceOfFn(e), 0);
+    return { grade: fill.target, credits, tax: buys.reduce((t, e) => t + taxOf(priceOfFn(e)), 0), buys: buys.length, unpriced };
+  }
   function summariseSet(set, pool, partial, priceOfFn) {
     const owned = (Array.isArray(pool) ? pool : []).filter((e) => e && e.isCollected);
     const line = bestLineup(owned, set.required);
     const score = scoreDetail(line).total;
     const g = gradeFor(set, score);
     let next;
+    let max;
     if (typeof priceOfFn === 'function')
       try {
         next = nextTokens(set, pool, priceOfFn, g);
+        max = maxPlan(set, pool, priceOfFn);
       } catch {
         next = undefined;
       }
@@ -728,7 +773,7 @@
     } catch {
       best = undefined;
     }
-    return { ...(next !== undefined ? { next } : {}), collected: line.length, required: set.required, score, grade: (g && g.grade) || null, tokens: g ? g.tokens : 0, partial: !!partial, best, at: Date.now() };
+    return { ...(next !== undefined ? { next } : {}), ...(max ? { max } : {}), collected: line.length, required: set.required, score, grade: (g && g.grade) || null, tokens: g ? g.tokens : 0, partial: !!partial, best, at: Date.now() };
   }
   function overview(sets, progress) {
     let synced = 0;
@@ -739,6 +784,8 @@
     const nextList = [];
     const closest = [];
     const sPossible = [];
+    const maxList = [];
+    const toMax = { credits: 0, tax: 0, sets: 0 };
     for (const s of sets) {
       const g = gradeFor(s, 0);
       tokensTotal += g ? g.maxTokens : 0;
@@ -750,6 +797,13 @@
         if (p.partial) partial = true;
         const n = p.next;
         if (n && n.reachable && (n.tokens > 0 || !g?.maxTokens)) nextList.push({ set: s, grade: n.grade, tokens: n.tokens, cost: n.cost, buys: n.buys, per: n.tokens > 0 ? n.cost / n.tokens : n.cost });
+        const m = p.max;
+        if (m && m.grade && m.buys > 0) {
+          maxList.push({ set: s, ...m, current: p.grade });
+          toMax.credits += m.credits;
+          toMax.tax += m.tax;
+          toMax.sets++;
+        }
         const req = Number(p.required) || Number(s.required) || 0;
         if (req > 0 && Number(p.collected) < req) closest.push({ set: s, collected: Number(p.collected) || 0, required: req, partial: !!p.partial });
       }
@@ -759,7 +813,8 @@
     nextList.sort((a, b) => a.per - b.per || b.tokens - a.tokens);
     closest.sort((a, b) => b.collected / b.required - a.collected / a.required || a.required - b.required);
     sPossible.sort((a, b) => (b.score ?? 0) / b.target - (a.score ?? 0) / a.target || a.set.name.localeCompare(b.set.name, 'fr'));
-    return { synced, totalSets: sets.length, score, tokens, tokensTotal, partial, nextTokens: nextList, closest, sPossible };
+    maxList.sort((a, b) => a.tax - b.tax || a.credits - b.credits);
+    return { synced, totalSets: sets.length, score, tokens, tokensTotal, partial, nextTokens: nextList, closest, sPossible, maxList, toMax };
   }
   const loadProgress = () => load(K_PROGRESS, {}) ?? {};
   function saveProgress(key, p) {
@@ -1403,6 +1458,9 @@
       if (this._bodyEl) this._set ? this._renderSetDetail() : this._renderSetGrid();
     };
     V._renderSetGrid = function () {
+      // Sets relus à chaque affichage : grades « possibles » et catalogue à jour après une synchro
+      const fresh = gallerySets();
+      if (fresh.length) this._data = { ...this._data, sets: fresh };
       this._clearBody();
       this._headerEl.innerHTML = '';
       const sets = (this._data?.sets || []).filter((s) => s.category === this._category);
@@ -1468,6 +1526,7 @@
       stat(t('ov.score'), num(r.score) + (r.partial ? '+' : ''), t('ov.scoreHint'));
       stat(t('ov.tokens'), r.tokensTotal ? t('ov.tokensOf', { n: num(r.tokens), total: num(r.tokensTotal) }) : '-', t('ov.tokensHint'));
       stat(t('ov.synced'), t('ov.tokensOf', { n: r.synced, total: r.totalSets }));
+      if (r.toMax.sets) stat(t('ov.toMax'), keepMode() ? t('ov.coins', { n: num(r.toMax.credits) }) : t('ov.toMaxValue', { tax: num(r.toMax.tax) }), t('ov.toMaxHint', { sets: r.toMax.sets, credits: num(r.toMax.credits), tax: num(r.toMax.tax) }));
       mine.appendChild(stats);
       const lv = block(t('ov.levels'), t('ov.levelsNote'));
       lv.classList.add('is-wide');
@@ -1478,6 +1537,18 @@
         ul.appendChild(li);
       }
       lv.appendChild(ul);
+      const mx = block(t('ov.max'), t('ov.maxNote'));
+      mx.classList.add('is-wide');
+      if (r.maxList.length)
+        for (const e of r.maxList.slice(0, 10))
+          row(
+            mx,
+            e.set,
+            t('ov.maxRow', { grade: e.grade, cur: e.current ? t('ov.maxCur', { grade: e.current }) : '', buys: e.buys }),
+            keepMode() ? t('ov.maxSideKeep', { credits: num(e.credits) }) : t('ov.maxSide', { credits: num(e.credits), tax: num(e.tax) }),
+            () => self._openSet(e.set, { grade: e.grade }),
+          );
+      else empty(mx, t('ov.maxEmpty'));
       const cheap = block(t('ov.cheapest'), t('ov.cheapestNote'));
       if (r.nextTokens.length)
         for (const e of r.nextTokens.slice(0, 6))
@@ -1496,6 +1567,30 @@
       if (r.sPossible.length) for (const e of r.sPossible.slice(0, 10)) row(sp, e.set, t('ov.sPossibleRow', { score: num(e.score ?? 0), target: num(e.target) }), null, null);
       else empty(sp, t('ov.sPossibleEmpty'));
       this._bodyEl.appendChild(wrap);
+    };
+    // Rang max atteignable (dernière synchro) : crédits à avancer et taxe
+    V._buildMaxLine = function (set, p) {
+      const m = p?.max;
+      const line = UI.el('div', 'fc27g-gallery-set-max');
+      if (!m) {
+        line.textContent = t('max.unsynced');
+        line.classList.add('is-muted');
+        return line;
+      }
+      const best = bestPossible(gradeFor(set, 0)?.ladder ?? []);
+      const extra = (m.unpriced ? t('max.hintUnpriced', { n: m.unpriced }) : '') + (best && best.grade !== m.grade ? t('max.best', { grade: best.grade }) : '');
+      if (!m.grade) {
+        line.textContent = t('max.none');
+        line.classList.add('is-muted');
+      } else if (!m.buys) {
+        line.textContent = t('max.reached', { grade: m.grade });
+        line.classList.add('is-done');
+      } else {
+        line.textContent = t(keepMode() ? 'max.lineKeep' : 'max.line', { grade: m.grade, credits: num(m.credits), tax: num(m.tax) });
+        line.title = t('max.hint', { buys: m.buys, grade: m.grade, unpriced: extra });
+      }
+      if (!line.title && extra) line.title = extra.trim();
+      return line;
     };
     V._buildSetCard = function (set) {
       const card = UI.el('div', 'fc27g-gallery-set-card');
@@ -1546,6 +1641,7 @@
       }
       card.appendChild(ladder);
       card.appendChild(UI.el('div', 'fc27g-gallery-tokens', g && g.maxTokens > 0 ? t('maxTokens', { n: g.maxTokens }) : ''));
+      card.appendChild(this._buildMaxLine(set, p));
       tap(card, () => this._openSet(set));
       return card;
     };
@@ -1910,7 +2006,16 @@
       const buys = counted.filter((e) => !e.isCollected);
       const unpriced = buys.filter((e) => !priceOf(e)).length;
       const cost = buys.reduce((s, e) => s + priceOf(e), 0);
-      if (cost > 0 || unpriced) row(t('cost'), `${num(cost)}${unpriced ? ` + ${unpriced} ${t('noPrice')}` : ''}`, 'fc27g-gallery-panel-row--cost');
+      if (cost > 0 || unpriced) {
+        row(t('panel.credits'), `${num(cost)}${unpriced ? ` + ${unpriced} ${t('noPrice')}` : ''}`, 'fc27g-gallery-panel-row--cost');
+        row(keepMode() ? t('panel.keep') : t('panel.tax'), num(buys.reduce((sum, e) => sum + taxOf(priceOf(e)), 0)));
+      }
+      const mp = this._ceilingKey === this._poolKey() ? this._max : null;
+      if (mp?.grade) {
+        const r = row(t('panel.max'), t(keepMode() ? 'panel.maxValueKeep' : 'panel.maxValue', { grade: mp.grade, credits: num(mp.credits), tax: num(mp.tax) }), 'fc27g-gallery-panel-row--max');
+        r.title = t('max.hint', { buys: mp.buys, grade: mp.grade, unpriced: mp.unpriced ? t('max.hintUnpriced', { n: mp.unpriced }) : '' }) + (this._next ? ` ${t('highestPartial')}` : '');
+        r.addEventListener('click', () => this._selectForGrade(mp.grade));
+      }
       if (g && g.maxTokens > 0) row(t('tokensEarned'), String(g.tokens));
       if (g?.reward) row(t('reward'), g.reward);
       P.appendChild(rows);
@@ -2057,6 +2162,7 @@
         await this._awaitPoolPrices();
         if (this._poolKey() !== key) return;
         this._ceiling = ceilingOf(this._pool, this._set, priceOf);
+        this._max = maxPlan(this._set, this._pool, priceOf);
         this._ceilingKey = key;
         this._refreshPanel();
       } catch {

@@ -846,6 +846,7 @@
           tile('Score de Galerie', `${fmt(ov.score)}${ov.partial ? '+' : ''}`, 'estimé, dernière synchro de chaque set'),
           tile('Sets synchronisés', `${ov.synced} / ${ov.totalSets}`, ''),
           ov.tokensTotal ? tile('Jetons gagnés', `${fmt(ov.tokens)} / ${fmt(ov.tokensTotal)}`, 'grades de set') : null,
+          ov.toMax.sets ? tile('Tout au rang max', this.cfg.afterBuy === 'keep' ? `${fmt(ov.toMax.credits)} crédits` : `taxe ${fmt(ov.toMax.tax)}`, `${ov.toMax.sets} set(s), ${fmt(ov.toMax.credits)} crédits à avancer`) : null,
         ),
         ov.nextTokens.length ? block('Prochains grades les moins chers', rows(ov.nextTokens.slice(0, 6), (e) => `grade ${e.grade}${e.tokens ? `, +${e.tokens} jetons` : ''}, ${e.buys} à acheter`)) : null,
         ov.closest.length ? block('Les plus proches d’être complets', rows(ov.closest.slice(0, 6).map((e) => ({ ...e, cost: null })), (e) => `${e.collected}${e.partial ? '+' : ''} / ${e.required}`)) : null,
