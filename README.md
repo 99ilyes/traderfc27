@@ -9,12 +9,12 @@ Extension Chrome unique pour la Web App FC 27 : fusion de SnipeFC27 (0.6.2) et A
 ## Interface
 
 - **Bouton flottant** (bas à gauche) : état en direct, bouton ▶ / ■ pour lancer ou arrêter le sniper, clic pour ouvrir le panneau.
-- **Panneau** : onglets Sniper, Galerie (résumé, accès à la vue Galerie de la Web App, catalogue fut.gg), Ventes, Journal, Réglages. Un bandeau unique montre la tâche en cours avec un seul bouton **Arrêter** (et « Lever la pause » pendant une pause anti-captcha).
+- **Panneau** : onglets Sniper, Galerie (sets et joueurs importés de fut.gg), Ventes, Journal, Réglages. Un bandeau unique montre la tâche en cours avec un seul bouton **Arrêter** (et « Lever la pause » pendant une pause anti-captcha).
 - **Popup** de l'extension : état, crédits, profit, lancer / arrêter le sniper, alternance, relister, ouvrir le panneau.
 
 ## Sniper (moteur SnipeFC27)
 
-1. Onglet Sniper > **Cibles** : chercher un joueur, « + Filtre de la Web App », ou ajouter des cartes manquantes depuis la Galerie (🎯).
+1. Onglet Sniper > **Cibles** : chercher un joueur ou « + Filtre de la Web App ».
 2. **Lancer le sniper**. Prix automatiques : achat un palier sous la moins chère du marché, baissé jusqu'au profit visé (2 % du prix, 150 minimum, ou profit min réglé), revente 1 h jamais sous le prix d'achat taxe comprise.
 3. **Alterner les cibles** (remplace le mode nuit) : change de cible toutes les 450 à 900 recherches.
 
@@ -24,22 +24,23 @@ Fonctionnement continu, toujours actif : le sniper attend au lieu de s'arrêter 
 
 Hésitations : 8 % des recherches, +0,5 à 1,5 s (au lieu de +1 à 4 s).
 
-## Galerie (système FutGenie)
+## Galerie (import fut.gg, achat puis revente)
 
-Vue intégrée à la Web App, reprise de l'extension FutGenie : tuile **Galerie** sur l'accueil (hub) de la Web App, ou « Ouvrir la Galerie » dans l'onglet Galerie du panneau.
+1. Onglet Galerie > **+ Importer depuis fut.gg** : ouvre la Galerie fut.gg.
+2. Sur fut.gg, bouton **Envoyer à FC27 Trader** (bas à droite) :
+   - page d'un **set** : tous ses joueurs (pages suivantes du set comprises), avec prix fut.gg et nombre de cartes requises ;
+   - page d'un **joueur** : la carte de l'adresse, ajoutée au set « Joueurs fut.gg » et déjà sélectionnée pour l'achat.
+   Autant d'envois que voulu, importés dans l'ordre à l'ouverture de la Web App (ou tout de suite si elle est ouverte). Renvoyer un set le met à jour.
+3. Dans le panneau : ouvrir un set, sélectionner les joueurs manquants (statut collecté lu chez EA ; joueurs déjà dans la Galerie ignorés). « × » retire un set, ou un joueur du set « Joueurs fut.gg ».
+4. **Acheter** (sur un set) ou **Acheter la sélection** (tous les sets) : fenêtre d'achat (prix de départ modifiable, résumé coût / revente / taxe, écart max), puis lancement.
 
-- **Sets** : catalogue fut.gg (importé à l'ouverture, au plus toutes les 6 h, ou un set à la fois avec « Envoyer à FC27 Trader » sur fut.gg). Places, seuils de grade D à S et jetons par grade (si la page les affiche) lus sur fut.gg. Rubriques fut.gg en onglets (Premier League, LaLiga…, Championnats, Raretés), plus un onglet **Aperçu**.
-- **Joueurs d'un set lus chez EA** : critère du set (club avec ses équipes liées hommes / femmes, championnat, nation, rareté) déduit des joueurs listés par fut.gg, puis recherche « concept » de la Web App par critère (91 joueurs par page, 10 pages au plus, « Charger plus de joueurs » ensuite, 1 à 2 s entre les pages). Chaque carte porte son **score de grade EA** (`gradingScore`) et son statut **collecté** (`isCollected`). Critère non reconnu : joueurs listés par fut.gg (requête /defid). Le sniper est suspendu pendant la lecture puis reprend (une seule tâche EA à la fois).
-- **Score d'un set** : meilleures cartes collectées dans la limite des places (recherche locale qui tient compte des tags), plus les **bonus de tags** (même nation / club / championnat, différents, bronze / argent / or, holographique, icônes, héros, TOTW, gardiens, doublons, ambidextre, techniques, mur défensif, contrôle du milieu, attaque totale ; 10 plus gros tags comptés). **Premier propriétaire** : cartes repérées avec un seul propriétaire au club (lu au passage dans les écrans de la Web App) ou marquées à la main (icône sur la carte), ou simulation en %.
-- **Fiche d'un set** : grille des cartes (Tous / Manquants / Collectionnés), score par carte, prix, loupe = marché des transferts ouvert sur la carte. Panneau : grade, score total, base + bonus, progression vers le grade suivant, détail des tags, jetons. **Le moins cher pour atteindre D…S** : composition la moins chère qui atteint le grade (cartes collectées gratuites, achats au prix connu), grades hors de portée grisés. **Acheter les N manquants** ouvre la fenêtre d'achat direct de l'extension (prix du marché, écart max, revente) ; **🎯 Sniper les N manquants** ouvre la fenêtre **Sniper Galerie** et lance tout de suite le sniping de ces cartes. But : remplir la Galerie au moindre coût en récupérant vite les crédits, pas faire du profit. Achat jusqu'à un palier sous la moins chère du marché, une carte par joueur, revente 1 h au prix du marché (même palier) si l'achat est en dessous, jamais sous le prix d'achat : coût au plus la taxe EA de 5 %, gain si la carte est achetée en dessous. « Après achat » (marge, club) respecté. Cartes en alternance, carte obtenue retirée du lot. La fenêtre suit la cible, ses prix, les cartes snipées et mises en vente, les crédits dépensés et le coût net ; « Fermer » laisse tourner, « Arrêter le sniper Galerie » arrête le lot. Coût suivi avec celui de la Galerie (onglet Ventes), hors statistiques du sniper (sessions, recherches, profit / h). Carte dont la moins chère est au prix minimum EA : achat à ce prix. Mise en vente bornée à la fourchette EA de la carte. Cibles habituelles non modifiées : suspendues pendant le lot, reprises à la fin si le sniper tournait. Le lot survit aux rechargements et aux tâches Galerie.
-- **Rang max, crédits, taxe** : pour chaque set synchronisé, le grade le plus haut atteignable avec tes cartes collectées et les cartes au prix connu (composition la moins chère), les crédits à avancer pour l'atteindre et la taxe EA de 5 % payée à la revente (coût réel ; prix entier si « Après achat » = club). Affichés sur chaque tuile de set (« Max A · 45 000 crédits · taxe 2 250 », détail au survol, grade possible avec toutes les cartes sorties si plus haut), dans l'Aperçu (bloc « Rang max par set », trié par taxe, et total « Tout au max ») et dans le panneau du set (crédits et taxe de la sélection, ligne « Rang max » qui sélectionne cette composition au clic). Cartes sans prix non comptées (signalées).
-- **Tout synchroniser** : lit chaque set tour à tour (sets lus il y a moins de 6 h sautés), interruptible. **Aperçu** : score de Galerie estimé, jetons gagnés, sets synchronisés, récompenses de niveau, prochains grades les moins chers, sets les plus proches d'être complets, S possible avec les joueurs sortis.
-- **Prix** : prix vérifié (fenêtre d'achat), prix fut.gg du set, sinon API de prix fut.gg (lots de 50, mis en cache 6 h). Carte sans prix : jamais proposée dans un plan, prix sondé sur le marché avant l'achat.
-- **Marché** : score de grade et pastille « COLLECTÉ » sur les lignes des résultats de recherche.
+Mise à jour depuis 1.x : au premier lancement, les sets du catalogue automatique sont retirés (sauf ceux qui contiennent des joueurs sélectionnés) ; vue Galerie FutGenie, scans, synchronisation par critère, sniper Galerie et catalogue automatique supprimés.
+
+Achat : pour chaque joueur, recherche au prix de départ (prix fut.gg, ou 4e annonce la moins chère du marché si sans prix) et achat de l'annonce la moins chère ; page de résultats pleine : recherche resserrée sous la moins chère vue (3 fois au plus) pour ne pas rater moins cher. Rien trouvé : prix relevé d'un palier, jusqu'à l'écart max (3 paliers par défaut). Revente 1 h **au prix d'achat**, ou **au prix du marché** (un palier sous l'annonce suivante) si le joueur a été acheté en dessous : coût au plus la taxe EA de 5 %, gain possible. Liste de transferts pleine : carte gardée au club. Crédits insuffisants : attente des ventes (relecture toutes les minutes). Le sniper est suspendu pendant les achats puis reprend. Joueurs non achetés : restent sélectionnés, « Racheter au prix vu » pour ceux dont le prix a dépassé l'écart max.
 
 ## Ventes
 
-Un seul **Relister les invendus** (sniper arrêté) : remet chaque invendu un palier sous la moins chère du marché, jamais sous le prix d'achat (taxe comprise pour un snipe, prix payé pour une carte Galerie). Règle unique de revente des cartes Galerie (achat direct, sniper Galerie, invendus) : prix du marché si l'achat est en dessous, jamais sous le prix payé. Pendant les pauses du sniper, les invendus Galerie sont remis en vente de la même façon. « Cartes Galerie en vente » : recalé sur la vraie liste de transferts à chaque lecture (ouverture de la Web App, pauses du sniper, liste ouverte dans la Web App, bouton « ↻ Actualiser ») ; une carte absente n'est plus suivie. Suivi du sniper (profit réel, par heure, en attente, snipes, recherches, temps, rendement sur les cartes vendues, taxe EA payée, délai de vente moyen, profit du jour), coût réel de la Galerie, dernières ventes.
+Un seul **Relister les invendus** (sniper arrêté) : remet chaque invendu un palier sous la moins chère du marché, jamais sous le prix d'achat (taxe comprise pour un snipe, prix payé pour une carte Galerie). Règle unique de revente des cartes Galerie (achat, invendus) : prix d'achat, ou prix du marché si l'achat est en dessous. Pendant les pauses du sniper, les invendus Galerie sont remis en vente de la même façon. « Cartes Galerie en vente » : recalé sur la vraie liste de transferts à chaque lecture (ouverture de la Web App, pauses du sniper, liste ouverte dans la Web App, bouton « ↻ Actualiser ») ; une carte absente n'est plus suivie. Suivi du sniper (profit réel, par heure, en attente, snipes, recherches, temps, rendement sur les cartes vendues, taxe EA payée, délai de vente moyen, profit du jour), coût réel de la Galerie, dernières ventes.
 
 Suivi détaillé du sniper (bouton « Réinitialiser » commun) :
 
@@ -56,6 +57,5 @@ Suivi détaillé du sniper (bouton « Réinitialiser » commun) :
 ## Limites connues
 
 - Testé sur une Web App simulée uniquement (moteurs, suspension et reprise, ventes, relist, pause captcha).
-- Import fut.gg dépendant de la mise en page de fut.gg.
-- Galerie : filtres club / championnat de la recherche « concept » passés comme dans FutGenie, filtre nation non vérifié ; API de prix fut.gg (`/api/fut/player-prices/27/`) non documentée, prix absents si elle ne répond pas. Barème des tags et jetons repris de FutGenie (non publiés par EA).
+- Import fut.gg dépendant de la mise en page de fut.gg (liens `/players/…/27-<defId>`, prix à côté de l'icône crédit).
 - L'automatisation de la Web App est contraire aux conditions d'EA : risque de restriction du marché ou du compte.

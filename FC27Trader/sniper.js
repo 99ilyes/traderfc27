@@ -11,7 +11,6 @@
   const K_BREAK = `${NS}:break`;
   const K_SALES = `${NS}:sales`;
   const K_COUNTED = `${NS}:counted`;
-  const K_BATCH = `${NS}:galleryBatch`;
   const FRESH_MS = 31e3;
   const MAX_ERRORS = 3;
   const MISTAKE = 15;
@@ -92,10 +91,8 @@
     tooManyNoted = false;
     albumDone = false;
     nextPileAt = 0;
-    // Sniper Galerie (popup de la vue Galerie) : lot de cartes à part des cibles habituelles, { name, cards, filters, idx, prevOn, at }
-    batch = load(K_BATCH, null);
 
-    // hooks : { gallerySnipe(id, defId, name, price, sell, kept, listed), onSnipe(defId, raw), isCollected(defId), albumSold(item), albumPrice(id), albumOnSale(), onListed(id, price), otherBusy(), afterTask() }
+    // hooks : { onSnipe(defId, raw), isCollected(defId), albumSold(item), albumPrice(id), albumOnSale(), onListed(id, price), otherBusy(), afterTask() }
     constructor(getConfig, onUpdate, patchConfig, hooks) {
       this.getConfig = getConfig;
       this.onUpdate = onUpdate;
@@ -147,7 +144,6 @@
         sales: this.sales.slice(0, 20),
         breakAt: this.breakAt,
         breakUntil: this.breakUntil,
-        batch: this.batch ? { name: this.batch.name, left: this.batch.filters.length, total: this.batch.cards.length } : null,
         rotationIn: this.running && this.task === 'snipe' && this.rotating ? Math.max(0, this.rotateAt - this.run.searches) : null,
         lockedUntil: this.guard.lockedUntil(),
         limits: this.guard.limits(),
@@ -174,8 +170,7 @@
       return out;
     }
     emit() {
-      // Lot Galerie : hors suivi du sniper (temps, recherches, profit / h)
-      if (this.running && this.task === 'snipe' && !this.batch) {
+      if (this.running && this.task === 'snipe') {
         const now = Date.now();
         const d = now - this.lastTick;
         const working = this.tickPhase !== 'break' && this.tickPhase !== 'wait';
@@ -206,7 +201,7 @@
       this.session = { ...EMPTY_SESSION, since: Date.now() };
       this.sales = [];
       this.stats.reset();
-      if (this.running && this.task === 'snipe' && !this.batch) this.stats.begin();
+      if (this.running && this.task === 'snipe') this.stats.begin();
       save(K_SESSION, this.session);
       save(K_SALES, this.sales);
       this.emit();
@@ -221,17 +216,12 @@
       if (this.running) return;
       this.setOn(true);
       if (this.hooks.otherBusy()) return this.note('Sniper : démarrage à la fin de la tâche Galerie en cours');
-      this.batch = load(K_BATCH, null);
-      if (this.batch && !this.batch.filters?.length) {
-        this.endBatch('aucune carte');
-        if (!this.on) return this.hooks.afterTask();
-      }
-      this.filters = this.batch ? this.batch.filters : X.parseFilters(this.cfg.snipeFilters);
+      this.filters = X.parseFilters(this.cfg.snipeFilters);
       if (!this.filters.length) {
         this.setOn(false);
-        return this.note('Aucune cible : ajouter un joueur, le filtre de la Web App ou des cartes de la Galerie', 'error');
+        return this.note('Aucune cible : ajouter un joueur ou le filtre de la Web App', 'error');
       }
-      this.idx = Math.min(Math.max(0, this.batch ? (this.batch.idx ?? 0) : this.cfg.activeFilter), this.filters.length - 1);
+      this.idx = Math.min(Math.max(0, this.cfg.activeFilter), this.filters.length - 1);
       this.running = true;
       this.task = 'snipe';
       this.stopRequested = false;
@@ -242,14 +232,11 @@
       this.tickPhase = 'idle';
       this.pricedAt = 0;
       this.tooManyNoted = false;
-      if (!this.batch) {
-        const resumed = this.stats.current;
-        const cur = this.stats.begin();
-        if (resumed && resumed !== cur) this.note('Plus de 30 min d’interruption : nouvelle session de suivi');
-      }
-      if (this.batch) this.note(`Sniper Galerie « ${this.batch.name} » : ${this.filters.length} carte(s) à sniper, alternance des cartes`);
-      else this.note(`Sniper : démarrage${this.cfg.rotate ? ', alternance des cibles' : ''}`);
-      if (!this.batch && this.cfg.rotate && this.filters.length < 2) this.note('Une seule cible : en ajouter une 2e pour alterner toutes les 450 à 900 recherches');
+      const resumed = this.stats.current;
+      const cur = this.stats.begin();
+      if (resumed && resumed !== cur) this.note('Plus de 30 min d’interruption : nouvelle session de suivi');
+      this.note(`Sniper : démarrage${this.cfg.rotate ? ', alternance des cibles' : ''}`);
+      if (this.cfg.rotate && this.filters.length < 2) this.note('Une seule cible : en ajouter une 2e pour alterner toutes les 450 à 900 recherches');
       let retries = 0;
       let lastErr = 0;
       try {
@@ -349,7 +336,7 @@
             const sn = this.snipes[c.id];
             // Plancher : prix d'achat taxe comprise (snipe), prix payé (achat Galerie)
             const floor = sn ? breakEven(sn.price) : this.hooks.albumPrice(c.id);
-            const price = sn ? Math.max(sell, floor) : X.galleryResale(floor, sell, this.cfg) || Math.max(sell, floor);
+            const price = sn ? Math.max(sell, floor) : X.galleryResale(floor, sell);
             this.setActivity(`Mise en vente de ${name} à ${fmt(price)}`, 'price');
             const done = c.raw ? await this.list(c.raw, name, price) : await this.listId(c.id, name, price);
             if (done) {
@@ -379,7 +366,6 @@
     // byUser : le sniper ne reprend plus seul ; sinon (tâche Galerie) il reprend ensuite
     stop(msg = 'Arrêt demandé', byUser = true) {
       if (byUser) {
-        if (this.batch) this.clearBatch();
         this.setOn(false);
         if (this.reloadTimer) {
           clearTimeout(this.reloadTimer);
@@ -397,34 +383,7 @@
       this.note(msg);
     }
     get rotating() {
-      return (this.cfg.rotate || !!this.batch) && this.filters.length > 1;
-    }
-    // Lot Galerie lancé depuis la vue Galerie : sniper habituel suspendu, repris à la fin du lot s'il tournait
-    async startBatch(name, cards, filters) {
-      const prevOn = this.batch ? this.batch.prevOn : this.on;
-      this.batch = { name, cards, filters, idx: 0, prevOn, at: Date.now() };
-      save(K_BATCH, this.batch);
-      if (this.running) await this.suspend(`Sniper : cibles habituelles suspendues pour le sniper Galerie « ${name} »`);
-      if (!this.running) void this.start();
-    }
-    // Fin du lot : cibles habituelles reprises si le sniper tournait avant
-    stopBatch(why = 'arrêté') {
-      if (!this.batch) return;
-      this.endBatch(why);
-      if (this.running) this.stop('Sniper Galerie : arrêt demandé', false);
-      else this.hooks.afterTask();
-    }
-    endBatch(why) {
-      const b = this.batch;
-      if (!b) return;
-      this.clearBatch();
-      this.setOn(!!b.prevOn);
-      this.note(`Sniper Galerie « ${b.name} » terminé (${why})${b.prevOn ? ' : reprise des cibles habituelles' : ''}`);
-    }
-    clearBatch() {
-      this.lastBatch = this.batch ? { ...this.batch, endedAt: Date.now() } : this.lastBatch;
-      this.batch = null;
-      save(K_BATCH, null);
+      return this.cfg.rotate && this.filters.length > 1;
     }
     // Arrêt le temps d'une tâche Galerie (achat en vol terminé avant)
     async suspend(why) {
@@ -592,9 +551,7 @@
           win = { n: 0, start: Date.now() };
         }
         // Cible Galerie achetée : retirée, cible suivante
-        // Sécurité lot Galerie : carte déjà obtenue pendant ce lot, jamais rachetée
-        const gotIt = this.batch && this.filter?.album && (this.batch.got ?? []).some((g) => Number(g.defId) === Number(this.filter.defId));
-        if (this.albumDone || gotIt) {
+        if (this.albumDone) {
           this.albumDone = false;
           if (!this.dropFilter(this.idx, 'carte obtenue pour la Galerie')) return;
           if (!(await this.prepareFilter())) return;
@@ -644,8 +601,7 @@
           win = { n: 0, start: Date.now() };
           continue;
         }
-        // Lot Galerie : une seule carte par joueur suffit
-        const budget = this.batch ? 1 : this.buyBudget();
+        const budget = this.buyBudget();
         let wallet = X.coins() ?? Infinity;
         this.setActivity(`Recherche ${f.label} ≤ ${fmt(f.buyPrice)}`, 'search');
         const res = await X.searchFilter(f, range);
@@ -664,10 +620,8 @@
         for (const i of buys) this.seen.add(i.tradeId), this.guard.recordPurchase();
         this.guard.recordSearch();
         this.run.searches++;
-        if (!this.batch) {
-          this.session.searches++;
-          this.stats.search(f);
-        }
+        this.session.searches++;
+        this.stats.search(f);
         win.n++;
         sinceCheck++;
         if (res.success) {
@@ -722,10 +676,7 @@
       return Math.max(1, Math.min(max, bids, room));
     }
     saveFilters() {
-      if (!this.batch) return this.patchConfig({ snipeFilters: JSON.stringify(this.filters), activeFilter: this.idx });
-      this.batch = { ...this.batch, filters: this.filters, idx: this.idx };
-      save(K_BATCH, this.batch);
-      this.emit();
+      this.patchConfig({ snipeFilters: JSON.stringify(this.filters), activeFilter: this.idx });
     }
     // Retire la cible n ; false s'il n'en reste aucune
     dropFilter(n, why) {
@@ -734,7 +685,6 @@
       if (this.idx >= this.filters.length) this.idx = 0;
       this.saveFilters();
       if (this.filters.length) return true;
-      if (this.batch) return this.endBatch('toutes les cartes du lot obtenues'), false;
       this.setOn(false);
       this.note('Plus aucune cible : sniper arrêté');
       return false;
@@ -814,7 +764,7 @@
     async search(filter, range) {
       const r = await X.searchFilter(filter, range);
       this.guard.recordSearch();
-      if (!this.batch) this.session.otherSearches++;
+      this.session.otherSearches++;
       if (!r.success) {
         if (r.status === 401) this.sessionExpired();
         if (X.BAD_STATUS.has(r.status)) this.lockout(`Statut EA ${r.status} (captcha ou limite)`);
@@ -837,18 +787,6 @@
     }
     applyPrices(f, lowest, minPrice) {
       this.pricedAt = Date.now();
-      // Lot Galerie : collection, pas profit. Achat jusqu'à un palier sous la moins chère du marché ; revente au prix du marché
-      // (même palier), jamais sous le prix d'achat (« Après achat » de la Galerie) : crédits récupérés vite pour les cartes suivantes
-      if (this.batch && f.album) {
-        // Moins chère au prix minimum EA : personne ne peut annoncer en dessous, achat à ce prix
-        const under = priceDown(lowest);
-        f.buyPrice = minPrice && under < minPrice ? lowest : under;
-        f.sellPrice = X.galleryResale(f.buyPrice, under, this.cfg);
-        f.pricedAt = this.pricedAt;
-        this.saveFilters();
-        this.note(`${f.label} (Galerie) : achat jusqu'à ${fmt(f.buyPrice)}, ${f.sellPrice ? `revente au prix du marché ${fmt(f.sellPrice)} (coût ~${fmt(f.buyPrice - net(f.sellPrice))} au plus, taxe EA)` : 'gardée au club'}`);
-        return true;
-      }
       const r = this.computePrices(lowest, minPrice);
       if (r.status !== 'ok') {
         this.note(r.status === 'belowListable' ? `${f.label} : prix sous le minimum EA` : `${f.label} : aucun prix d'achat rentable`, 'error');
@@ -874,17 +812,11 @@
           this.run.snipes++;
           const id = Number(it.raw?.id);
           const defId = it.defId || this.filter.defId || 0;
-          // Lot Galerie : coût suivi par la Galerie, hors statistiques de profit du sniper
-          if (this.batch && this.filter.album) {
-            this.batch.got = [...(this.batch.got ?? []), { id, defId, price: it.buyNow, sell: 0, at: Date.now() }];
-            save(K_BATCH, this.batch);
-          } else {
-            this.session.snipes++;
-            const sid = this.stats.snipe(defId, name, it.buyNow);
-            if (id) {
-              this.snipes[id] = { defId, label: name, price: it.buyNow, at: Date.now(), sid };
-              save(K_SNIPES, this.snipes);
-            }
+          this.session.snipes++;
+          const sid = this.stats.snipe(defId, name, it.buyNow);
+          if (id) {
+            this.snipes[id] = { defId, label: name, price: it.buyNow, at: Date.now(), sid };
+            save(K_SNIPES, this.snipes);
           }
           this.note(`Snipé ${name} à ${fmt(it.buyNow)} ! (${ageText(it.expires)}, réponse en ${ms} ms)`, 'snipe');
           if (this.cfg.snipeSound) X.beep();
@@ -895,10 +827,8 @@
         } else if (res.status === 401 || X.BAD_STATUS.has(res.status)) fatal ??= res.status;
         else if (X.MISS_STATUS.has(res.status)) {
           this.run.misses++;
-          if (!this.batch) {
-            this.session.misses++;
-            this.stats.miss(it.defId || this.filter.defId || 0, name);
-          }
+          this.session.misses++;
+          this.stats.miss(it.defId || this.filter.defId || 0, name);
           this.note(`Raté de peu : ${name} à ${fmt(it.buyNow)} (${ageText(it.expires)}, réponse en ${ms} ms)`, 'miss');
         } else {
           this.seen.delete(it.tradeId);
@@ -916,7 +846,6 @@
       const f = this.filter;
       const name = label(it);
       const defId = it.defId || f.defId || 0;
-      if (this.batch && f.album) return await this.afterGallerySnipe(it, name, defId), false;
       if (!this.cfg.sellAfterSnipe) return await this.moveTransfer(it.raw, name), false;
       let sell = f.sellPrice;
       let repriced = false;
@@ -950,30 +879,6 @@
       if (X.BAD_STATUS.has(r.status)) this.lockout(`Statut EA ${r.status} (captcha ou limite)`);
       this.note(`Mise en vente de ${name} échouée (statut ${r.status})`, 'error');
       return 0;
-    }
-    // Carte du lot Galerie : revente au prix du marché, jamais sous le prix d'achat (ou marge, ou club) selon « Après achat » de la Galerie
-    async afterGallerySnipe(it, name, defId) {
-      const id = Number(it.raw?.id);
-      const p = defId ? this.prices[defId] : null;
-      const sell = X.galleryResale(it.buyNow, p ? priceDown(p.lowest) : this.filter.sellPrice, this.cfg);
-      const got = this.batch?.got?.find((g) => g.id === id);
-      const done = (listed, kept) => {
-        if (got) {
-          got.sell = listed;
-          got.kept = kept;
-          save(K_BATCH, this.batch);
-        }
-        this.hooks.gallerySnipe(id, defId, name, it.buyNow, listed || sell, kept, !!listed);
-      };
-      if (!sell || X.transferCount() >= X.PILE_MAX) {
-        const m = await X.toClub(it.raw);
-        this.note(`${name} ${m.success ? 'gardé au club' : 'laissé dans les non-assignés'} (Galerie${sell ? ', liste de transferts pleine' : ''})`);
-        return done(0, m.success);
-      }
-      if (!(await this.moveTransfer(it.raw, name))) return done(0, false);
-      const listed = await this.listGallery(it.raw, name, sell);
-      if (listed) this.note(`Mis en vente ${name} à ${fmt(listed)} (Galerie, ${profitOf(it.buyNow, listed) >= 0 ? `gain ${fmt(profitOf(it.buyNow, listed))}` : `coût ${fmt(-profitOf(it.buyNow, listed))}`})`);
-      done(listed, false);
     }
     async moveTransfer(raw, name, why = '') {
       const r = await X.toTransfer(raw);
@@ -1099,7 +1004,7 @@
     async relistGallery(i) {
       const paid = this.hooks.albumPrice(i.id);
       const p = await this.marketOf(i.defId, i.name);
-      const price = await this.listGallery(i.raw, i.name, X.galleryResale(paid, p ? priceDown(p.lowest) : 0, this.cfg) || roundPrice(paid));
+      const price = await this.listGallery(i.raw, i.name, X.galleryResale(paid, p ? priceDown(p.lowest) : 0));
       if (price) {
         this.hooks.onListed(i.id, price);
         this.note(`${i.state === 'expired' ? 'Remis' : 'Mis'} en vente ${i.name} à ${fmt(price)} (Galerie${p && price > roundPrice(paid) ? ', prix du marché' : ''})`);

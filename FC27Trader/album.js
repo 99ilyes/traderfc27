@@ -1,15 +1,17 @@
-// Galerie (moteur) : sets fut.gg, statut Galerie lu chez EA, achat direct au prix du marché (méthode FST) ; vue et calculs dans gallery.js
+// Galerie : sets et joueurs importés depuis fut.gg, statut collecté lu chez EA, achat direct au plus bas puis revente
 // Garde-fous, délais et pause anti-captcha : ceux du moteur de sniping (communs)
 (function () {
   const X = globalThis.__fc27;
   const { fmt: fmtNum, rand, sleep, load, save, errText, errMsg, roundPrice, tickUp, net: netOf } = X;
   const NS = X.ALBUM_NS;
   const BUY_SEARCHES = 10;
+  const NARROW_SEARCHES = 3;
   const MAX_COMPETITION = 6;
   const MAX_MISSES = 8;
   const MAX_LIST_FAILS = 3;
   const FEED_SIZE = 30;
   const DEFAULT_TOLERANCE = 3;
+  const PLAYERS_SLUG = 'joueurs';
 
   const K_SETS = `${NS}:sets`;
   const K_SEL = `${NS}:pick`;
@@ -22,10 +24,7 @@
   const K_TOTAL = `${NS}:total`;
   const K_LOCK_RESUME = `${NS}:lockResume`;
   const K_IMPORT_AT = `${NS}:importAt`;
-  const K_HIDDEN = `${NS}:hiddenSets`;
-  const K_CATALOG_AT = `${NS}:catalogAt`;
-  const K_CLUB = `${NS}:club`;
-  const K_COLL = `${NS}:collection`;
+  const K_MIGRATED = `${NS}:manualImport`;
   X.ALBUM_KEYS = { K_RESUME, K_ACTIVE, K_LOCK_RESUME, K_IMPORT_AT };
 
   const tolCap = (p, n) => {
@@ -35,35 +34,10 @@
   };
   // Prix plancher du sondage (FST) : or/argent/bronze selon la note pour les cartes communes et rares, 1 000 sinon
   const minPriceFor = (rareflag, rating) => (![0, 1].includes(Number(rareflag ?? 0)) ? 1e3 : Number(rating) >= 75 ? 350 : 200);
-  const markupPrice = (p, pct) => {
-    if (pct <= 0) return roundPrice(p);
-    const m = p * (1 + pct / 100);
-    return Math.max(Math.ceil(m / X.step(m)) * X.step(m), tickUp(p));
-  };
   // Annonce publiée depuis plus d'une minute (FST écarte les annonces toutes fraîches du prix de référence)
   const DURATIONS = [3600, 10800, 21600, 43200, 86400, 259200];
   const settled = (sr) => !Number.isFinite(sr) || Math.floor(((DURATIONS.find((d) => sr < d) ?? DURATIONS[DURATIONS.length - 1]) - sr) / 60) > 1;
   const validId = (v) => (Number.isInteger(Number(v)) && Number(v) > 0 ? Number(v) : null);
-  const tierOf = (r) => (r >= 75 ? 'g' : r >= 65 ? 's' : r > 0 ? 'b' : '');
-  // Critère d'un set selon sa rubrique fut.gg (/fut-gallery/<rubrique>/<set>/) : ligue, nation, rareté ; sinon club
-  const CRIT_HINT = { leagues: 'l', nations: 'n', rarities: 'f', clubs: 'c' };
-  const CRIT_LABEL = { l: 'Ligue', n: 'Nation', f: 'Rareté', c: 'Club' };
-  X.CRIT_LABEL = CRIT_LABEL;
-  function loadColl() {
-    const out = new Map();
-    for (const [id, v] of Object.entries(load(K_COLL, {}) ?? {})) {
-      const d = validId(id);
-      if (d && Array.isArray(v)) out.set(d, { r: v[0] || 0, f: v[1] >= 0 ? v[1] : null, l: v[2] || 0, c: v[3] || 0, n: v[4] || 0 });
-    }
-    // Première ouverture : cartes déjà snipées, passées au club donc dans la Galerie (attributs lus chez EA à la synchro)
-    if (load(K_COLL, null) === null)
-      for (const id of Object.keys(load(`${X.SNIPE_NS}:stats`, {})?.players ?? {})) {
-        const d = validId(id);
-        if (d && !out.has(d)) out.set(d, { r: 0, f: null, l: 0, c: 0, n: 0 });
-      }
-    return out;
-  }
-
   function loadBought() {
     const out = {};
     for (const [id, b] of Object.entries(load(K_BOUGHT, {}) ?? {})) {
@@ -77,19 +51,17 @@
   const isFailed = (q) => q.status === 'notfound' || q.status === 'nocoins' || q.status === 'moved';
   const costOf = (q) => (q.status === 'listed' ? q.price - netOf(q.sell || q.price) : q.price);
   const tolOf = (cfg) => (cfg.toleranceAuto ? DEFAULT_TOLERANCE : cfg.tolerance);
-  const sellFor = (p, cfg) => (cfg.afterBuy === 'keep' ? 0 : cfg.afterBuy === 'markup' ? markupPrice(p, cfg.markupPct) : roundPrice(p));
-  // Revente d'une carte Galerie (achat direct, sniper Galerie, relist) : prix du marché (un palier sous la moins chère) si l'achat est en dessous,
-  // sinon prix d'achat (ou marge) ; 0 = gardée au club. Crédits récupérés au plus vite pour acheter les cartes suivantes
-  const resaleFor = (p, market, cfg) => (cfg.afterBuy === 'keep' ? 0 : Math.max(sellFor(p, cfg), roundPrice(Number(market) || 0)));
+  // Revente d'une carte Galerie (achat, relist) : prix d'achat, ou prix du marché (un palier sous la moins chère) si l'achat est en dessous
+  const resaleFor = (p, market) => Math.max(roundPrice(p), roundPrice(Number(market) || 0));
   const isOpen = (q) => q.status === 'pending' || q.status === 'searching';
   const isUnsold = (b) => b.state === 'expired' || b.state === 'unlisted';
-  // Tâches reprises seules après une pause anti-captcha (la lecture des joueurs de la vue Galerie se relance à la main)
-  const RESUMABLE = new Set(['buy', 'check']);
+  // Tâches reprises seules après une pause anti-captcha
+  const RESUMABLE = new Set(['buy']);
   const EMPTY_TOTAL = { bought: 0, spent: 0, sold: 0, received: 0, tax: 0, lost: 0, kept: 0, keptSpent: 0 };
   Object.assign(X, { isDone, isFailed, isOpen, isUnsold, tolOf, netOf, step: X.step, galleryResale: resaleFor });
 
   X.Album = class {
-    mode = null; // 'buy' | 'check' | null
+    mode = null; // 'buy' | null
     stopRequested = false;
     activityText = '';
     lastMessage = '';
@@ -110,11 +82,6 @@
     resumeAt = 0;
     version = 0;
     itemData = new Map(); // defId -> itemData EA (/defid), pour afficher les cartes
-    hiddenSets = new Set(load(K_HIDDEN, []));
-    catalog = { busy: false, text: '', at: Number(load(K_CATALOG_AT, 0)) || 0 };
-    clubIds = new Set(load(K_CLUB, null)?.ids ?? []); // joueurs présents au club au dernier scan
-    // Collection Galerie connue : joueurs passés au club (scans, achats, snipes, statut EA), defId -> attributs
-    coll = loadColl();
     waitUntil = 0;
     waitLabel = '';
 
@@ -193,7 +160,7 @@
       return Object.values(this.sets).sort((a, b) => b.at - a.at);
     }
     refreshCollected(p) {
-      if (!p.collected && (X.netItems.get(p.defId)?.collected || this.done.has(p.defId) || this.clubIds.has(p.defId) || this.coll.has(p.defId))) p.collected = true;
+      if (!p.collected && (X.netItems.get(p.defId)?.collected || this.done.has(p.defId))) p.collected = true;
       return p;
     }
     setPlayers(set) {
@@ -221,8 +188,6 @@
       const set = this.sets[key];
       if (!set) return;
       delete this.sets[key];
-      this.hiddenSets.add(key);
-      save(K_HIDDEN, [...this.hiddenSets]);
       const still = new Set(Object.values(this.sets).flatMap((s) => Object.keys(s.players ?? {})));
       for (const id of Object.keys(this.selection)) if (!still.has(id)) delete this.selection[id];
       save(K_SEL, this.selection);
@@ -230,7 +195,7 @@
       this.log(`Set « ${set.name} » retiré`);
     }
 
-    // Projection de coût selon « Après achat » (revente : coût = taxe 5 % ; club : coût = prix payé)
+    // Projection de coût : revente au prix d'achat, coût = taxe EA de 5 %
     picks(defIds) {
       const cfg = this.getConfig();
       const list = [];
@@ -248,7 +213,7 @@
         list.push({ p, start, cap: tolCap(start, tolOf(cfg)) });
       }
       const sum = (f) => list.reduce((s, x) => s + f(x), 0);
-      const back = (price) => (cfg.afterBuy === 'keep' ? 0 : netOf(sellFor(price, cfg)));
+      const back = (price) => netOf(roundPrice(price));
       const w = X.coins();
       let fit = list.length;
       if (w !== null) {
@@ -267,64 +232,13 @@
         spend: sum((x) => x.start),
         capSpend: sum((x) => x.cap),
         back: sum((x) => back(x.start)),
-        tax: cfg.afterBuy === 'keep' ? 0 : sum((x) => sellFor(x.start, cfg) - back(x.start)),
+        tax: sum((x) => roundPrice(x.start) - back(x.start)),
         fit,
         cost: sum((x) => x.start - back(x.start)),
         capCost: sum((x) => x.cap - back(x.cap)),
       };
     }
 
-    // --- Collection et critère des sets ---
-
-    addOwned(defId, a) {
-      const d = validId(defId);
-      if (!d) return;
-      const prev = this.coll.get(d) ?? { r: 0, f: null, l: 0, c: 0, n: 0 };
-      const next = { ...prev };
-      if (a) for (const k of ['r', 'l', 'c', 'n']) if (a[k] > 0) next[k] = a[k];
-      if (a && a.f !== null && a.f !== undefined) next.f = a.f;
-      this.coll.set(d, next);
-    }
-    saveColl() {
-      const o = {};
-      for (const [id, a] of this.coll) o[id] = [a.r, a.f ?? -1, a.l, a.c, a.n];
-      if (!save(K_COLL, o)) this.log('Stockage local plein : collection Galerie non enregistrée', 'warn');
-      this.touch();
-    }
-    // Attributs connus d'une carte : collection, réponse EA /defid, carte fut.gg
-    attrsOf(defId) {
-      const c = this.coll.get(defId);
-      if (c?.l || c?.c || c?.n) return c;
-      const e = X.attrsFrom(this.itemData.get(defId));
-      if (e && (e.l || e.c || e.n)) return e;
-      const p = this.findPlayer(defId);
-      return p && (p.l || p.c || p.n) ? { r: p.rating || 0, f: p.rareflag ?? null, l: p.l || 0, c: p.c || 0, n: p.n || 0 } : (c ?? null);
-    }
-    // Critère du set (ligue, club, nation, rareté) déduit de sa rubrique et des joueurs listés par fut.gg (équipe la moins chère) ;
-    // null : set à liste fixe (seuls les joueurs listés comptent)
-    critOf(set) {
-      let seg = [];
-      try {
-        seg = new URL(set.url).pathname.split('/').filter(Boolean);
-      } catch {}
-      const k = CRIT_HINT[seg[1]] ?? (seg.length >= 3 ? 'c' : null);
-      if (!k) return null;
-      const ps = Object.values(set.players ?? {});
-      const known = ps.map((p) => this.attrsOf(p.defId)).filter((a) => a && (k === 'f' ? a.f !== null && a.f !== undefined : a[k] > 0));
-      if (!known.length || known.length < ps.length * 0.6) return null;
-      const v = new Set(known.map((a) => a[k]));
-      if (v.size > (k === 'n' ? 1 : 2)) return null;
-      // Club déduit (rubrique non reconnue) : un club doit dominer la liste, sinon set à liste fixe (saisons, promos…)
-      if (!CRIT_HINT[seg[1]] && Math.max(...[...v].map((x) => known.filter((a) => a[k] === x).length)) < Math.max(3, known.length * 0.7)) return null;
-      const tiers = new Set(known.map((a) => tierOf(a.r)));
-      return { k, v, tier: k === 'f' && tiers.size === 1 ? [...tiers][0] : '' };
-    }
-    // Places d'un set : joueurs requis lus sur fut.gg (« requires 20 … players »), sinon taille de la liste
-    slotsOf(set) {
-      if (set.needed > 0) return set.needed;
-      // Places inconnues : taille de la liste fut.gg actuelle (sans les joueurs gardés d'une liste précédente)
-      return Object.values(set.players ?? {}).filter((p) => !p.kept).length;
-    }
     selectedPlayers() {
       const seen = new Set();
       const out = [];
@@ -343,9 +257,7 @@
       const sets = (keys ?? Object.keys(this.sets)).map((k) => this.sets[k]).filter(Boolean);
       const byId = new Map();
       for (const s of sets) for (const p of Object.values(s.players ?? {})) byId.set(p.defId, [...(byId.get(p.defId) ?? []), p]);
-      // Cartes de la collection sans attributs (snipes, achats anciens) : lues avec le reste
-      const bare = keys ? [] : [...this.coll].filter(([id, a]) => !byId.has(id) && !(a.l || a.c || a.n)).map(([id]) => id);
-      const ids = [...byId.keys(), ...bare];
+      const ids = [...byId.keys()];
       if (!ids.length) return true;
       const seen = new Set();
       const got = new Set();
@@ -358,20 +270,18 @@
         }
         for (const it of r.items) {
           const defId = Number(it.resourceId || it.assetId || it.id);
-          if (byId.has(defId)) this.itemData.set(defId, it);
-          const at = X.attrsFrom(it);
-          if (this.coll.has(defId) || it.isCollected === true) this.addOwned(defId, at);
-          for (const p of byId.get(defId) ?? []) {
+          if (!byId.has(defId)) continue;
+          this.itemData.set(defId, it);
+          for (const p of byId.get(defId)) {
             seen.add(defId);
             if (Number.isFinite(Number(it.rareflag))) p.rareflag = Number(it.rareflag);
             if (!p.rating && Number(it.rating)) p.rating = Number(it.rating);
-            Object.assign(p, { l: at.l || p.l || 0, c: at.c || p.c || 0, n: at.n || p.n || 0 });
             if (typeof it.isCollected !== 'boolean') continue;
-            X.netItems.set(defId, { ...X.netItems.get(defId), ...at, collected: it.isCollected });
+            X.netItems.set(defId, { ...X.netItems.get(defId), collected: it.isCollected });
             if (it.isCollected) {
               if (!p.collected) got.add(defId);
               p.collected = true;
-            } else if (p.collected && !this.clubIds.has(defId) && !this.coll.has(defId)) {
+            } else if (p.collected) {
               if (this.done.has(defId)) lost.add(p.name);
               p.collected = false;
             }
@@ -381,7 +291,6 @@
         }
       }
       save(K_DONE, [...this.done]);
-      this.saveColl();
       for (const s of sets) s.syncedAt = Date.now();
       this.saveSets();
       if (!keys) this.gallerySyncAt = Date.now();
@@ -392,16 +301,18 @@
       return true;
     }
 
+    // Import depuis fut.gg : page d'un set (liste remplacée) ou page d'un joueur (ajouté au set « Joueurs fut.gg »)
     buildSet(data) {
       const list = Array.isArray(data?.players) ? data.players : [];
-      const slug = String(data?.slug || data?.name || 'set');
+      const single = data?.kind === 'player';
+      const slug = single ? PLAYERS_SLUG : String(data?.slug || data?.name || 'set');
       const key = `futgg:${slug}`;
       const before = this.sets[key];
       const prev = before?.players ?? {};
-      const players = {};
+      const players = single ? { ...prev } : {};
       for (const x of list) {
         const defId = validId(x?.defId);
-        if (!defId || players[defId]) continue;
+        if (!defId || (!single && players[defId])) continue;
         const nc = X.netItems.get(defId)?.collected;
         players[defId] = {
           defId,
@@ -409,94 +320,70 @@
           rating: Number(x.rating) || prev[defId]?.rating || 0,
           minPrice: Number(x.price) >= 150 ? Math.round(Number(x.price)) : 0,
           rareflag: this.findPlayer(defId)?.rareflag ?? null,
-          l: prev[defId]?.l || 0,
-          c: prev[defId]?.c || 0,
-          n: prev[defId]?.n || 0,
           collected: nc === true || this.done.has(defId) || (nc === undefined && prev[defId]?.collected === true),
         };
       }
       if (!Object.keys(players).length) return null;
-      // fut.gg change sa liste au gré des prix et des nouvelles cartes : un joueur déjà collecté du set reste compté
-      for (const p of Object.values(prev)) if (!players[p.defId] && (p.collected || this.coll.has(p.defId))) players[p.defId] = { ...p, kept: true };
-      const grades = data.grades && typeof data.grades === 'object' ? data.grades : (before?.grades ?? null);
-      const tokens = data.tokens && typeof data.tokens === 'object' ? data.tokens : (before?.tokens ?? null);
-      return { kind: 'futgg', slug, key, name: String(data.name || 'Set fut.gg').slice(0, 60), url: String(data.url || ''), needed: Number(data.needed) || before?.needed || 0, grades, tokens, source: 'futgg', at: Date.now(), players };
+      const name = single ? 'Joueurs fut.gg' : String(data.name || 'Set fut.gg').slice(0, 60);
+      return { kind: 'futgg', slug, key, name, url: single ? '' : String(data.url || ''), needed: single ? 0 : Number(data.needed) || before?.needed || 0, at: Date.now(), players };
     }
+    // Renvoie la clé du set et les joueurs importés
     importSet(data) {
       const set = this.buildSet(data);
       if (!set) return this.log('Import fut.gg : aucun joueur lu sur la page'), null;
       const again = !!this.sets[set.key];
       this.sets[set.key] = set;
-      if (this.hiddenSets.delete(set.key)) save(K_HIDDEN, [...this.hiddenSets]);
       if (!this.saveSets()) this.log('Stockage local plein : set non enregistré (perdu au rechargement)', 'warn');
+      const ids = (data.players ?? []).map((x) => validId(x?.defId)).filter((d) => d && set.players[d]);
+      if (data.kind === 'player') {
+        // Joueur envoyé depuis sa page : à acheter
+        for (const id of ids) if (!set.players[id].collected) this.setSelected(id, true, set.players[id].minPrice);
+        const p = set.players[ids[0]];
+        this.log(`${p?.name ?? 'Joueur'} importé${p?.collected ? ' (déjà dans la Galerie)' : ', sélectionné pour l’achat'}`);
+        return set.key;
+      }
       const all = Object.values(set.players);
       const priced = all.filter((p) => p.minPrice).length;
       this.log(`Set « ${set.name} » ${again ? 'mis à jour' : 'importé'} : ${all.length} joueur(s), ${all.filter((p) => p.collected).length} déjà collecté(s)${priced < all.length ? `, ${all.length - priced} sans prix (sondage)` : ''}`);
       return set.key;
     }
-    requestCatalog(force) {
-      if (this.catalog.busy) return;
-      this.catalog = { ...this.catalog, busy: true, text: 'démarrage…' };
-      window.postMessage({ ns: NS, dir: 'to-ext', catalog: { force } }, window.location.origin);
-      this.touch();
-      this.emit();
+    // Passage à l'import manuel : sets du catalogue automatique retirés (sauf ceux qui ont des joueurs sélectionnés), anciennes données effacées
+    migrateManualImport() {
+      if (load(K_MIGRATED, false)) return;
+      save(K_MIGRATED, true);
+      for (const k of ['hiddenSets', 'catalogAt', 'club', 'collection', 'parseV', 'galleryProgress', 'firstOwner', 'firstOwnerMode', 'firstOwnerPct', 'futggPrices'])
+        try {
+          localStorage.removeItem(`${NS}:${k}`);
+        } catch {}
+      try {
+        localStorage.removeItem(`${X.SNIPE_NS}:galleryBatch`);
+      } catch {}
+      const before = Object.keys(this.sets).length;
+      for (const [key, set] of Object.entries(this.sets)) if (!Object.keys(set.players ?? {}).some((id) => this.isSelected(id))) delete this.sets[key];
+      const left = Object.keys(this.sets).length;
+      this.saveSets();
+      if (before > left) this.log(`Galerie : ${before - left} set(s) du catalogue automatique retiré(s)${left ? `, ${left} gardé(s) (joueurs sélectionnés)` : ''}. Importe les sets voulus depuis fut.gg.`);
     }
-    catalogStatus(patch) {
-      this.catalog = { ...this.catalog, ...patch };
-      if (patch.at) save(K_CATALOG_AT, patch.at);
-      if (!patch.busy) this.touch();
+    removePlayer(key, defId) {
+      const set = this.sets[key];
+      if (!set?.players?.[defId]) return;
+      delete set.players[defId];
+      if (!this.findPlayer(defId)) this.setSelected(defId, false);
+      if (!Object.keys(set.players).length) delete this.sets[key];
+      this.saveSets();
       this.emit();
-    }
-    importCatalog(list, at, failed = 0) {
-      const base = Date.now();
-      const keys = [];
-      let added = 0;
-      let hidden = 0;
-      (Array.isArray(list) ? list : []).forEach((data, i) => {
-        const set = this.buildSet(data);
-        if (!set) return;
-        if (this.hiddenSets.has(set.key)) return void hidden++;
-        const prev = this.sets[set.key];
-        this.sets[set.key] = { ...set, at: prev?.at ?? base - i, syncedAt: prev?.syncedAt };
-        if (!prev) added++;
-        keys.push(set.key);
-      });
-      const stored = this.saveSets();
-      this.catalogStatus({ busy: false, text: '', at });
-      this.log(`Catalogue fut.gg : ${keys.length} set(s) (${added} nouveau(x), ${keys.length - added} mis à jour)${hidden ? `, ${hidden} retiré(s) à la main ignoré(s)` : ''}${failed ? `, ${failed} page(s) sans joueur` : ''}`);
-      if (!stored) this.log('Stockage local plein : catalogue non enregistré, perdu au rechargement (retirer des sets puis « Réimporter »)', 'warn');
-      return keys;
     }
 
     // --- Liens avec le sniper ---
 
     // Carte snipée : comptée pour la Galerie si elle manquait ; true si c'était une carte manquante
-    onSnipe(defId, raw) {
-      // Manquante avant ce snipe ? (lu avant l'ajout à la collection, sinon toujours « déjà collectée »)
+    onSnipe(defId) {
       const p = this.findPlayer(defId);
-      const missing = !!p && !this.refreshCollected(p).collected;
-      // Toute carte snipée passe au club : comptée dans la collection Galerie
-      this.addOwned(defId, X.attrsFrom(raw));
-      this.saveColl();
-      if (!missing) return false;
+      if (!p || this.refreshCollected(p).collected) return false;
       this.markCollected(defId);
       this.setSelected(defId, false);
       this.log(`${p.name} obtenu par snipe pour la Galerie`, 'buy');
       return true;
-    }
-    // Carte du sniper Galerie (lot) : coût suivi comme un achat direct Galerie (revente au prix du marché, jamais sous le prix payé)
-    onGallerySnipe(id, defId, name, price, sell, kept, listed) {
-      this.addTotal('bought', 1);
-      this.addTotal('spent', price);
-      if (kept) {
-        this.addTotal('kept', 1);
-        this.addTotal('keptSpent', price);
-      } else if (id) {
-        // Mise en vente échouée : suivie comme invendue, « Relister » ne descend jamais sous le prix payé
-        this.bought[id] = { price, sell: sell || price, defId, name, state: listed ? 'active' : 'unlisted', at: Date.now() };
-        this.saveBought();
-      }
-      this.touch();
     }
     // Vente d'une carte achetée pour la Galerie : décomptée ici (le sniper l'affiche dans les ventes)
     recordSold(i) {
@@ -602,7 +489,6 @@
       save(K_LOCK_RESUME, null);
       this.log('Galerie : reprise automatique');
       if (intent.mode === 'buy' && this.queue.some(isOpen)) await this.runQueue();
-      else if (intent.mode === 'check') await this.checkPrices(true);
     }
     sessionExpired() {
       const d = rand(6e4, 12e4);
@@ -739,55 +625,6 @@
       return r.items?.[0]?.buyNow ?? null;
     }
 
-    // --- Vérifier les prix : le prix trouvé devient le prix de départ ---
-
-    async checkPrices(resume = false, ids) {
-      this.checkedAt ??= {};
-      const only = ids ? new Set(ids.map(Number)) : null;
-      const list = this.selectedPlayers().filter(({ p }) => (!only || only.has(p.defId)) && (!resume || Date.now() - (this.checkedAt[p.defId] ?? 0) > 15 * 6e4));
-      if (!list.length) return this.log(resume ? 'Vérification des prix : tous les joueurs cochés ont été vérifiés' : 'Aucun joueur coché');
-      if (!(await this.enter('check'))) return;
-      let ok = 0;
-      let none = 0;
-      try {
-        this.log(`Vérification du prix de ${list.length} joueur(s) sur le marché (4e annonce la moins chère)`);
-        for (const [i, { p }] of list.entries()) {
-          if (this.stopRequested) break;
-          if (i) await this.sleep(this.delay(), 'Joueur suivant');
-          if (this.stopRequested) break;
-          this.activity(`${p.name} : sondage du prix`);
-          const c = await this.checkPrice(p);
-          if (c.stop) break;
-          if (c.collected) {
-            this.markCollected(p.defId);
-            this.setSelected(p.defId, false);
-            this.feed(`${p.name} : déjà dans la Galerie, décoché`);
-            continue;
-          }
-          if (c.error) {
-            this.feed(`${p.name} : sondage en échec (statut ${c.error})`, 'error');
-            continue;
-          }
-          if (!c.price) {
-            none++;
-            this.feed(`${p.name} : aucune annonce sur le marché`, 'miss');
-            continue;
-          }
-          const old = Number(this.selection[p.defId]) || 0;
-          this.setSelected(p.defId, true, c.price);
-          this.checkedAt[p.defId] = Date.now();
-          ok++;
-          this.touch();
-          this.feed(`${p.name} : prix du marché ${fmtNum(c.price)}${old && old !== c.price ? ` (était ${fmtNum(old)})` : ''}`);
-        }
-        if (!this.stopRequested) this.log(`Prix vérifiés : ${ok}/${list.length}${none ? `, ${none} sans annonce` : ''}`);
-      } catch (err) {
-        this.log(`Erreur : ${errMsg(err)}`, 'error');
-      } finally {
-        this.leave();
-      }
-    }
-
     // --- Achat direct (FST) : recherche au prix de départ, hausse d'un palier si rien, tolérance en paliers ---
 
     async validate(defIds) {
@@ -820,8 +657,7 @@
       const n = this.queue.length;
       const cfg = this.getConfig();
       for (const e of this.queue) if (isOpen(e) && e.start) e.cap = tolCap(e.start, tolOf(cfg));
-      const after = cfg.afterBuy === 'keep' ? 'gardés au club' : cfg.afterBuy === 'markup' ? `revendus avec +${cfg.markupPct} %` : "revendus au prix d'achat";
-      this.log(`Achat de ${n} joueur(s), écart max ${tolOf(cfg)} palier(s) EA au-dessus du prix de départ, ${after}`);
+      this.log(`Achat de ${n} joueur(s) au plus bas, écart max ${tolOf(cfg)} palier(s) EA au-dessus du prix de départ, revente au prix d'achat (prix du marché si l'achat est en dessous)`);
       try {
         if (await this.syncGallery(undefined, 5 * 6e4)) {
           for (const e of this.queue)
@@ -934,13 +770,25 @@
         if (!(await this.affordable(150)) && !(await this.waitCredits(150, e.name))) return this.stopRequested ? undefined : this.giveUp(e, 'nocoins', `crédits insuffisants (${fmtNum(X.coins())})`);
         e.status = 'searching';
         this.activity(`${e.name} : recherche ≤ ${fmtNum(e.max)}${e.max > e.start ? ` (relevé, tolérance ${fmtNum(e.cap)})` : ''}`);
-        const r = await this.search(e.defId, { minBuy, maxBuy: e.max });
+        let r = await this.search(e.defId, { minBuy, maxBuy: e.max });
         e.searches++;
         if (r.stop) return;
         if (r.collected) return this.skipCollected(e);
         if (r.error) {
           this.feed(`${e.name} : recherche en échec (statut ${r.error})`, 'error');
           continue;
+        }
+        // Page pleine : des annonces moins chères peuvent manquer, recherche resserrée sous la moins chère vue
+        for (let k = 0; r.full && r.items.length && k < NARROW_SEARCHES; k++) {
+          const below = X.priceDown(r.items[0].buyNow);
+          if (below < 150 || below <= minBuy) break;
+          await this.sleep(this.delay(), `Recherche moins chère pour ${e.name}`);
+          const r2 = await this.search(e.defId, { minBuy, maxBuy: below });
+          e.searches++;
+          if (r2.stop) return;
+          if (r2.collected) return this.skipCollected(e);
+          if (r2.error || !r2.items.length) break;
+          r = r2;
         }
         const cands = r.items.slice(0, 2);
         if (!cands.length) {
@@ -991,16 +839,13 @@
       this.touch();
       await this.runQueue();
     }
-    markCollected(defId, raw) {
-      this.addOwned(defId, raw ? X.attrsFrom(raw) : this.attrsOf(Number(defId)));
-      this.saveColl();
+    markCollected(defId) {
       this.done.add(Number(defId));
       save(K_DONE, [...this.done]);
       for (const s of Object.values(this.sets)) if (s.players?.[defId]) s.players[defId].collected = true;
       this.saveSets();
     }
     async buyAndList(it, e) {
-      const cfg = this.getConfig();
       if (!(await this.waitGuard(true))) return 'stop';
       await sleep(rand(300, 900));
       if (this.stopRequested) return 'stop';
@@ -1021,7 +866,7 @@
       const price = it.buyNow;
       e.price = price;
       e.status = 'bought';
-      this.markCollected(e.defId, it.raw);
+      this.markCollected(e.defId);
       this.setSelected(e.defId, false);
       this.addTotal('bought', 1);
       this.addTotal('spent', price);
@@ -1036,12 +881,11 @@
         }
         this.feed(`${name} ${m.success ? 'gardé au club' : 'laissé dans les non-assignés (déplacement au club échoué)'}${why ? ` : ${why}` : ''}`);
       };
-      const keepMode = cfg.afterBuy === 'keep';
-      if (keepMode || this.pileCount >= X.PILE_MAX || X.pileFull()) {
-        await keep(keepMode ? '' : 'liste de transferts pleine');
+      if (this.pileCount >= X.PILE_MAX || X.pileFull()) {
+        await keep('liste de transferts pleine');
         return 'ok';
       }
-      const l = await X.listClamped(it.raw, resaleFor(price, e.market, cfg));
+      const l = await X.listClamped(it.raw, resaleFor(price, e.market));
       if (!l.success) {
         if (this.fatal(l, 'list')) return 'stop';
         await keep(`mise en vente échouée (statut ${l.status})${errText(l.error)}`);
@@ -1061,7 +905,7 @@
         this.saveBought();
       }
       const loss = price - netOf(l.price);
-      this.feed(`${name} mis en vente à ${fmtNum(l.price)} (${loss >= 0 ? `coût ${fmtNum(loss)}` : `gain ${fmtNum(-loss)}`})`);
+      this.feed(`${name} mis en vente à ${fmtNum(l.price)}${l.price > roundPrice(price) ? ' (prix du marché)' : ''} (${loss >= 0 ? `coût ${fmtNum(loss)}` : `gain ${fmtNum(-loss)}`})`);
       return 'ok';
     }
 

@@ -110,7 +110,6 @@
     risky: { label: 'Risqué', info: 'pause 1-3 min toutes les 8-15 min, 10-20 min toutes les 2-3 h', every: [480, 900], rest: [60, 180], longEvery: [7200, 10800], longRest: [600, 1200] },
     dangerous: { label: 'Dangereux', info: 'aucune pause', every: null, rest: null, longEvery: null, longRest: null },
   };
-  X.AFTER_BUY = { keep: 'Garder au club', relist: 'Revendre au prix du marché', markup: 'Revendre avec marge' };
 
   // ---------- Réglages (un seul objet, enregistré sous la clé de SnipeFC27) ----------
 
@@ -129,9 +128,6 @@
     maxBuysPerSearch: 2,
     tolerance: 3,
     toleranceAuto: true,
-    afterBuy: 'relist',
-    markupPct: 5,
-    autoCatalog: true,
     tab: 'snipe',
   };
   const K_CONFIG = `${X.SNIPE_NS}:config`;
@@ -145,9 +141,6 @@
       if (a) {
         if (Number.isFinite(Number(a.tolerance))) out.tolerance = Math.min(10, Math.max(0, Math.floor(Number(a.tolerance))));
         if (typeof a.toleranceAuto === 'boolean') out.toleranceAuto = a.toleranceAuto;
-        if (X.AFTER_BUY[a.afterBuy]) out.afterBuy = a.afterBuy;
-        if (Number.isFinite(Number(a.markupPct))) out.markupPct = Math.min(100, Math.max(0, Number(a.markupPct)));
-        if (typeof a.autoCatalog === 'boolean') out.autoCatalog = a.autoCatalog;
       }
       if (load(`${X.SNIPE_NS}:night`, false) === true) out.rotate = true;
       save(K_CONFIG, { ...out, merged: true });
@@ -177,27 +170,12 @@
   X.lastPile = () => lastPile;
   X.onPile = (cb) => pileListeners.push(cb);
 
-  // Attributs utiles à la Galerie (note, rareté, ligue, club, nation), depuis un itemData EA ou une carte Web App
-  X.attrsFrom = (it) => {
-    if (!it || typeof it !== 'object') return null;
-    const pos = (v) => (Number(v) > 0 ? Number(v) : 0);
-    const f = Number(it.rareflag ?? it._rareflag);
-    return {
-      r: pos(it.rating ?? it._rating),
-      f: it.rareflag == null && it._rareflag == null ? null : Number.isFinite(f) ? f : null,
-      l: pos(it.leagueId ?? it._leagueId),
-      c: pos(it.teamId ?? it.teamid ?? it._teamId),
-      n: pos(it.nationId ?? it.nation ?? it._nationId),
-    };
-  };
   function recordItems(j) {
     const list = [...(Array.isArray(j.itemData) ? j.itemData : []), ...(Array.isArray(j.auctionInfo) ? j.auctionInfo.map((a) => a?.itemData) : [])];
     for (const it of list) {
       const defId = Number(it?.resourceId ?? 0);
       if (!defId || it.itemType !== 'player') continue;
-      const prev = X.netItems.get(defId);
-      const score = Number(it.gradingScore);
-      X.netItems.set(defId, { ...X.attrsFrom(it), collected: it.isCollected === true || !!prev?.collected, score: Number.isFinite(score) ? score : prev?.score });
+      X.netItems.set(defId, { collected: it.isCollected === true || !!X.netItems.get(defId)?.collected });
     }
   }
   function onResponse(url, status, body) {
