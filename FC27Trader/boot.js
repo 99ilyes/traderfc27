@@ -38,8 +38,8 @@
         X.saveConfig(this.cfg);
         onUpdate();
       },
-      // Cibles habituelles : copie du sniper pendant qu'il tourne dessus, sinon celles des réglages (lot Galerie à part)
-      live: () => sniper.running && sniper.task === 'snipe' && !sniper.batch,
+      // Cibles : copie du sniper pendant qu'il tourne dessus, sinon celles des réglages
+      live: () => sniper.running && sniper.task === 'snipe',
       targets() {
         return this.live() ? sniper.filters : X.parseFilters(this.cfg.snipeFilters);
       },
@@ -89,25 +89,6 @@
           return 0;
         });
       },
-      // Sniper Galerie : lot de cartes à part des cibles habituelles (achat sous le marché, revente au prix du marché) ; renvoie le nombre de cartes
-      snipeBatch(name, defIds) {
-        const cards = [];
-        const filters = [];
-        for (const id of [...new Set(defIds.map(Number))]) {
-          const p = album.findPlayer(id);
-          if (!p || album.isCollected(id)) continue;
-          const label = `${p.name}${p.rating ? ` ${p.rating}` : ''}`;
-          cards.push({ defId: id, label });
-          filters.push(this.newTarget({ label, defId: id, criteria: null, album: true }));
-        }
-        if (!filters.length) return 0;
-        X.unlockAudio();
-        void sniper.startBatch(name, cards, filters);
-        return filters.length;
-      },
-      stopBatch() {
-        sniper.stopBatch();
-      },
       startSniper() {
         X.unlockAudio();
         void sniper.start();
@@ -145,8 +126,7 @@
       onUpdate,
       (patch) => app.setConfig(patch),
       {
-        onSnipe: (defId, raw) => album.onSnipe(defId, raw),
-        gallerySnipe: (...args) => album.onGallerySnipe(...args),
+        onSnipe: (defId) => album.onSnipe(defId),
         isCollected: (defId) => album.isCollected(defId),
         albumSold: (i) => album.recordSold(i),
         albumPrice: (id) => album.bought[id]?.price ?? 0,
@@ -179,16 +159,11 @@
     ui = new X.UI(app);
     app.ui = ui;
     X.app = app;
-    X.gallery.install();
 
+    album.migrateManualImport();
     const n = album.setList().length;
     album.log(`${X.APP} prêt${n ? ` (${n} set${n > 1 ? 's' : ''} Galerie)` : ''}`);
     if (n) setTimeout(() => !album.running && void album.syncGallery(), 5e3);
-    // Lecture fut.gg enrichie (joueurs requis, seuils et jetons de grade) : catalogue relu une fois après la mise à jour
-    if (Number(load(`${NS}:parseV`, 0)) < 3) {
-      save(`${NS}:parseV`, 3);
-      if (n) album.requestCatalog(true);
-    } else if (app.cfg.autoCatalog) album.requestCatalog(false);
     // Suivi des cartes Galerie recalé sur la vraie liste de transferts au démarrage
     if (Object.keys(album.bought).length) setTimeout(() => !album.running && !sniper.running && app.refreshPile(), 8e3);
 
@@ -224,19 +199,14 @@
       else if (cmd.type === 'rotate') app.setConfig({ rotate: !!cmd.on });
       else if (cmd.type === 'toggle-panel') ui.toggle();
       else if (cmd.type === 'relist') app.relist();
-      else if (cmd.type === 'prices') X.gallery.onPrices(cmd);
-      else if (cmd.type === 'catalog-progress') album.catalogStatus({ busy: true, text: `Catalogue fut.gg : ${cmd.text}` });
-      else if (cmd.type === 'catalog-fresh') album.catalogStatus({ busy: false, text: '', at: Number(cmd.at) || album.catalog.at });
-      else if (cmd.type === 'catalog-error') {
-        album.catalogStatus({ busy: false, text: '' });
-        album.log(`Catalogue fut.gg indisponible (${String(cmd.error || 'erreur').slice(0, 120)}) : import manuel possible`, 'warn');
-      } else if (cmd.type === 'catalog') {
-        const keys = album.importCatalog(cmd.sets, Number(cmd.at) || Date.now(), Number(cmd.failed) || 0);
-        if (keys.length && !album.running) void album.syncGallery(keys);
-      } else if (cmd.type === 'import' && Number(cmd.data?.at) > Number(load(X.ALBUM_KEYS.K_IMPORT_AT, 0))) {
+      // Envois fut.gg (sets, joueurs), chacun importé une seule fois, dans l'ordre d'envoi
+      else if (cmd.type === 'import' && Number(cmd.data?.at) > Number(load(X.ALBUM_KEYS.K_IMPORT_AT, 0))) {
         save(X.ALBUM_KEYS.K_IMPORT_AT, Number(cmd.data.at));
         const key = album.importSet(cmd.data);
-        if (key && !X.gallery.open(key)) ui.show('gallery');
+        if (!key) return;
+        ui.openSet(key);
+        ui.show('gallery');
+        if (!album.running) void album.syncGallery([key]);
       }
     };
     pendingCmds.splice(0).forEach(onCommand);

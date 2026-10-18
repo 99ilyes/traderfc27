@@ -1,8 +1,8 @@
 {
   "manifest_version": 3,
   "name": "FC27 Trader",
-  "version": "1.6.0",
-  "description": "Web App FC 27 : sniper qui tourne sans interruption pour gagner des crédits, et Galerie (vue intégrée à la Web App : score EA par carte, grades, plan le moins cher par grade, catalogue fut.gg).",
+  "version": "2.0.0",
+  "description": "Web App FC 27 : sniper qui tourne sans interruption pour gagner des crédits, et Galerie : sets et joueurs importés depuis fut.gg, achetés au plus bas et revendus au prix d'achat (ou au prix du marché si achetés en dessous).",
   "action": {
     "default_popup": "popup.html",
     "default_title": "FC27 Trader",
@@ -31,15 +31,11 @@
         "stats.js",
         "sniper.js",
         "album.js",
-        "gallery.js",
         "ui.js",
         "boot.js"
       ],
       "world": "MAIN",
-      "run_at": "document_idle",
-      "css": [
-        "gallery.css"
-      ]
+      "run_at": "document_idle"
     },
     {
       "matches": [
@@ -47,7 +43,6 @@
         "https://www.ea.com/*/ea-sports-fc/ultimate-team/web-app/*"
       ],
       "js": [
-        "futgg-parse.js",
         "bridge.js"
       ],
       "run_at": "document_idle"
