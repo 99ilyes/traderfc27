@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "FC27 Trader",
-  "version": "2.0.0",
+  "version": "2.0.1",
   "description": "Web App FC 27 : sniper qui tourne sans interruption pour gagner des crédits, et Galerie : sets et joueurs importés depuis fut.gg, achetés au plus bas et revendus au prix d'achat (ou au prix du marché si achetés en dessous).",
   "action": {
     "default_popup": "popup.html",

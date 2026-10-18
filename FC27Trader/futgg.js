@@ -30,6 +30,20 @@
     return [...byId.values()];
   }
 
+  // Prix fut.gg actuels par l'API du site (lots de 50) ; prix affiché sur la page gardé si l'API ne répond pas
+  async function fillPrices(list) {
+    const ids = list.map((p) => p.defId);
+    const prices = {};
+    for (let i = 0; i < ids.length; i += 50) {
+      try {
+        const r = await fetch(`/api/fut/player-prices/27/?ids=${ids.slice(i, i + 50).join(',')}`, { credentials: 'include' });
+        if (r.ok) F.pricesFrom(await r.json(), prices);
+      } catch {}
+    }
+    for (const p of list) if (prices[p.defId]) p.price = prices[p.defId];
+    return list;
+  }
+
   async function send(data) {
     try {
       const { albumImports } = await chrome.storage.local.get('albumImports');
@@ -51,12 +65,16 @@
       if (pageKind() === 'player') {
         const data = F.playerData(document, location.href);
         if (!data) return toast('Joueur introuvable sur cette page');
-        if (await send(data)) toast(`${data.players[0].name} envoyé à FC27 Trader (prix vérifié sur le marché avant l'achat)`);
+        await fillPrices(data.players);
+        const p = data.players[0];
+        if (await send(data)) toast(`${p.name} envoyé à FC27 Trader${p.price ? ` (prix fut.gg ${p.price.toLocaleString('fr-FR')})` : " (sans prix fut.gg : vérifié sur le marché avant l'achat)"}`);
         return;
       }
       btn.textContent = 'Lecture du set…';
       const list = await allPlayers();
       if (!list.length) return toast('Aucun joueur trouvé sur cette page');
+      btn.textContent = 'Lecture des prix…';
+      await fillPrices(list);
       const data = F.setData(document, location.href, list);
       if (!(await send(data))) return;
       const noPrice = list.filter((p) => !p.price).length;

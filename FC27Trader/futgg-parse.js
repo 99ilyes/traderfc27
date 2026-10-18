@@ -105,14 +105,37 @@ globalThis.AlbumFutgg = (() => {
     const path = new URL(url).pathname;
     return { at: Date.now(), kind: 'set', slug: path.match(GALLERY_RE)?.[1] ?? 'set', name: setName(doc, path), url, needed: needed(doc), players: list };
   }
-  // Page d'un joueur (/players/<id>-<nom>/27-<defId>/) : la carte de l'adresse ; prix sondé sur le marché avant l'achat
+  // Prix affiché sur la page d'un joueur : premier montant à côté d'une icône crédit hors des cartes d'autres joueurs
+  function pagePrice(doc) {
+    for (const img of doc.querySelectorAll('img[src*="coin" i], img[alt="Coin" i]')) {
+      if (img.closest('a[href*="/players/"]')) continue;
+      const p = parsePrice(img.parentElement?.textContent || '');
+      if (p) return p;
+    }
+    return null;
+  }
+  // Page d'un joueur (/players/<id>-<nom>/27-<defId>/) : la carte de l'adresse
   function playerData(doc, url) {
     const m = new URL(url).pathname.match(PLAYER_RE);
     if (!m || !Number(m[4])) return null;
     const h1 = doc.querySelector('h1')?.textContent?.replace(/\s+/g, ' ').trim();
     const name = h1 && h1.length <= 40 ? h1 : toName(m[2]);
-    return { at: Date.now(), kind: 'player', url, players: [{ defId: Number(m[4]), name, price: null, rating: 0 }] };
+    return { at: Date.now(), kind: 'player', url, players: [{ defId: Number(m[4]), name, price: pagePrice(doc), rating: 0 }] };
   }
 
-  return { GALLERY_RE, PLAYER_RE, players, setData, playerData, pageLinks };
+  // Réponse de l'API de prix fut.gg (format non documenté, lu défensivement) : { eaId|definitionId|id, currentPrice.price|price }
+  function pricesFrom(j, out = {}) {
+    const walk = (o, depth) => {
+      if (!o || typeof o !== 'object' || depth > 5) return;
+      if (Array.isArray(o)) return void o.forEach((x) => walk(x, depth + 1));
+      const id = Number(o.eaId ?? o.ea_id ?? o.definitionId ?? o.id);
+      const p = Number(o.currentPrice?.price ?? o.price ?? o.currentPrice);
+      if (id > 0 && p >= 150 && !o.currentPrice?.isUntradeable && !o.isUntradeable) out[id] = Math.round(p);
+      for (const v of Object.values(o)) if (v && typeof v === 'object') walk(v, depth + 1);
+    };
+    walk(j, 0);
+    return out;
+  }
+
+  return { GALLERY_RE, PLAYER_RE, players, setData, playerData, pageLinks, pricesFrom };
 })();
