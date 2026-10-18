@@ -16,7 +16,7 @@ Extension Chrome unique pour la Web App FC 27 : fusion de SnipeFC27 (0.6.2) et A
 
 1. Onglet Sniper > **Cibles** : chercher un joueur ou « + Filtre de la Web App ».
 2. **Lancer le sniper**. Prix automatiques : achat un palier sous la moins chère du marché, baissé jusqu'au profit visé (2 % du prix, 150 minimum, ou profit min réglé), revente 1 h jamais sous le prix d'achat taxe comprise.
-3. **Alterner les cibles** (remplace le mode nuit) : change de cible toutes les 450 à 900 recherches.
+3. **Alterner les cibles** (remplace le mode nuit) : change de cible après un nombre de recherches réglable (Court 50-100, Moyen 150-300, Normal 450-900 par défaut, Long 900-1 800), tiré au hasard dans la fourchette.
 
 Ventes détectées vite : liste de transferts relue toutes les 2 à 4 min pendant le sniping tant que des cartes sont en vente ; liste pleine ou crédits insuffisants : relue toutes les 1 à 2 min et reprise dès qu'une vente libère la place ou les crédits (avant : nouvel essai après 8 à 12 min). Achat direct Galerie en attente de crédits : relecture toutes les minutes.
 

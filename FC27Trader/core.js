@@ -111,6 +111,14 @@
     dangerous: { label: 'Dangereux', info: 'aucune pause', every: null, rest: null, longEvery: null, longRest: null },
   };
 
+  X.ROTATE_PRESETS = {
+    short: { label: 'Court', info: '50-100 recherches', range: [50, 100] },
+    medium: { label: 'Moyen', info: '150-300 recherches', range: [150, 300] },
+    safe: { label: 'Normal', info: '450-900 recherches', range: [450, 900] },
+    long: { label: 'Long', info: '900-1 800 recherches', range: [900, 1800] },
+  };
+  X.rotateInfo = (k) => (X.ROTATE_PRESETS[k] ?? X.ROTATE_PRESETS.safe).info;
+
   // ---------- Réglages (un seul objet, enregistré sous la clé de SnipeFC27) ----------
 
   X.DEFAULTS = {
@@ -118,6 +126,7 @@
     activeFilter: 0,
     sellAfterSnipe: true,
     rotate: false,
+    rotateEvery: 'safe',
     breakPreset: 'safe',
     delayPreset: 'safe',
     mistakePrevention: true,
@@ -147,6 +156,7 @@
     }
     if (!X.DELAY_PRESETS[out.delayPreset]) out.delayPreset = 'safe';
     if (!X.BREAK_PRESETS[out.breakPreset]) out.breakPreset = 'safe';
+    if (!X.ROTATE_PRESETS[out.rotateEvery]) out.rotateEvery = 'safe';
     return out;
   };
   X.saveConfig = (cfg) => save(K_CONFIG, { ...cfg, merged: true });
