@@ -1,8 +1,8 @@
 {
   "manifest_version": 3,
   "name": "FC27 Trader",
-  "version": "1.4.3",
-  "description": "Web App FC 27 : sniper qui tourne sans interruption pour gagner des crédits, et remplissage automatique des sets de la Galerie (catalogue fut.gg).",
+  "version": "1.5.0",
+  "description": "Web App FC 27 : sniper qui tourne sans interruption pour gagner des crédits, et Galerie (vue intégrée à la Web App : score EA par carte, grades, plan le moins cher par grade, catalogue fut.gg).",
   "action": {
     "default_popup": "popup.html",
     "default_title": "FC27 Trader",
@@ -31,11 +31,15 @@
         "stats.js",
         "sniper.js",
         "album.js",
+        "gallery.js",
         "ui.js",
         "boot.js"
       ],
       "world": "MAIN",
-      "run_at": "document_idle"
+      "run_at": "document_idle",
+      "css": [
+        "gallery.css"
+      ]
     },
     {
       "matches": [

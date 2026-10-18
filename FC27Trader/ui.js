@@ -3,7 +3,6 @@
 (function () {
   const X = globalThis.__fc27;
   const { fmt, fmtSigned, hm, fmtClock, fmtWait, perHour, profitOf, isOpen, isFailed, isUnsold, tolOf, netOf, step } = X;
-  const PAGE_CARDS = 36;
   const FUTGG_GALLERY = 'https://www.fut.gg/fut-gallery/';
   const MAX_TOLERANCE = 10;
 
@@ -280,8 +279,6 @@
   const setting = (label, sub, control) => h('div', { className: 'setting' }, h('span', {}, label, sub ? h('small', { textContent: sub }) : null), control);
   const perH = (v) => (v === null ? '—' : `${fmtSigned(v)} / h`);
   const rate = (a, b) => (a + b ? ` · réussite ${Math.round((100 * a) / (a + b))} %` : '');
-  // Recherche insensible à la casse et aux accents
-  const norm = (t) => String(t ?? '').normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase();
   const sign = (v) => (v > 0 ? 'pos' : v < 0 ? 'neg' : '');
   const dur = (ms) => (ms >= 36e5 ? `${Math.floor(ms / 36e5)} h ${String(Math.floor((ms % 36e5) / 6e4)).padStart(2, '0')}` : `${Math.max(0, Math.round(ms / 6e4))} min`);
   const when = (t) => new Date(t).toLocaleString('fr-FR', { weekday: 'short', day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' });
@@ -291,16 +288,6 @@
     const el = h('div', { className: 'stbl', style: `--cols:${cols}` }, r(head, 'hd'), ...rows.map(([cells, cls, title]) => r(cells, cls, title)));
     return el;
   }
-  // Grade estimé d'un set (score sans bonus de tags) et prochain seuil
-  const gradePill = (gr) =>
-    gr.grade || gr.next
-      ? h('span', {
-          className: `a-pill${gr.grade === 'S' ? ' ok' : gr.grade ? ' ac' : ''}`,
-          title: `Score estimé ~${fmt(gr.score)} (cartes de ta collection, sans bonus de tags : souvent plus haut en jeu)${gr.next ? ` · ${gr.next.grade} à ${fmt(gr.next.at)}` : ''}`,
-          textContent: `Grade ${gr.grade ?? '—'}${gr.next ? ` · ${gr.next.grade} à ${fmtShort(gr.next.at)}` : ''}`,
-        })
-      : null;
-  const fmtShort = (v) => (v >= 1e6 ? `${(v / 1e6).toLocaleString('fr-FR', { maximumFractionDigits: 1 })} M` : v >= 1e3 ? `${Math.round(v / 1e3)} k` : String(v));
   const cell = (text, cls) => h('span', { className: cls, textContent: text });
   const ago = (t) => {
     const m = Math.floor((Date.now() - t) / 6e4);
@@ -319,29 +306,6 @@
       ta.remove();
       return ok;
     }
-  }
-
-  // Carte rendue par la Web App à partir de l'itemData EA ; null si indisponible
-  const cardCache = new Map();
-  function cardElement(defId, itemData) {
-    if (cardCache.has(defId)) return cardCache.get(defId);
-    if (!itemData) return null;
-    let el = null;
-    try {
-      const item = window.factories?.Item?.generateItemsFromItemData?.([{ ...itemData, dream: false }])?.[0];
-      const VF = window.UTItemViewFactory;
-      if (item && VF?.createSmallItem) {
-        const view = VF.createSmallItem(item);
-        view.init();
-        view.supportSecondaryViews = false;
-        view.render(item);
-        el = view.getRootElement();
-      }
-    } catch {
-      el = null;
-    }
-    cardCache.set(defId, el);
-    return el;
   }
 
   function rowStatus(q) {
@@ -371,20 +335,12 @@
   const PHASES = { idle: 'DÉMARRAGE', search: 'RECHERCHE', price: 'VÉRIFICATION DU PRIX', break: 'PAUSE', wait: 'EN ATTENTE' };
 
   X.UI = class {
-    setKey = null;
-    filter = 'missing';
-    text = '';
-    page = 0;
     buyKey = null;
     buyKeys = [];
-    homeText = '';
-    homeFilter = 'all';
-    homeSel = new Set();
     buyRows = [];
     jfilter = 'all';
     shownEventId = 0;
     lastSig = '';
-    synced = new Map();
     queued = false;
 
     constructor(app) {
@@ -436,20 +392,16 @@
       };
       this.launcher = h('div', { className: 'a-launch', title: `Ouvrir ${X.APP}`, onclick: () => this.show() }, this.launchDot, h('span', { textContent: X.APP }), this.launchSub, this.launchBtn);
 
-      this.backBtn = h('button', { type: 'button', className: 'a-back', textContent: '←', title: 'Retour aux sets', onclick: () => this.openSet(null) });
       this.eyebrowEl = h('div', { className: 'a-eyebrow' });
       this.titleEl = h('div', { className: 'a-title' });
       this.subEl = h('div', { className: 'a-sub' });
-      this.syncBtn = btn('', () => void this.syncCurrent(), 'small');
       this.coinsEl = h('span', { className: 'a-coins', title: 'Crédits disponibles' });
       this.coinsBtn = h('button', { type: 'button', className: 'a-coins-btn', textContent: '↻', title: 'Actualiser les crédits', onclick: () => void this.refreshCoins() });
       const head = h(
         'div',
         { className: 'a-head' },
-        this.backBtn,
         h('span', { className: 'a-mark', textContent: 'F' }),
         h('div', { className: 'a-text' }, this.eyebrowEl, this.titleEl, this.subEl),
-        this.syncBtn,
         this.coinsEl,
         this.coinsBtn,
         h('button', { type: 'button', className: 'a-close', textContent: '×', title: 'Fermer', onclick: () => this.close() }),
@@ -508,28 +460,15 @@
     }
     renderHead() {
       const a = this.album;
-      const set = this.setKey && this.tab === 'gallery' ? a.sets[this.setKey] : null;
-      this.backBtn.style.display = set ? '' : 'none';
-      this.eyebrowEl.textContent = set ? 'Galerie · Set' : X.APP;
-      this.titleEl.textContent = set ? set.name : Object.fromEntries(TABS)[this.tab];
-      if (set) {
-        const all = a.setPlayers(set);
-        const pr = a.progress(set);
-        const gr = a.gradeOf(set);
-        this.subEl.textContent = `Places remplies ${pr.have} / ${pr.slots} · ${gr.grade || gr.next ? `grade estimé ${gr.grade ?? '—'} (~${fmt(gr.score)}${gr.next ? `, ${gr.next.grade} à ${fmt(gr.next.at)}` : ''}) · ` : ''}${pr.crit ? `${X.CRIT_LABEL[pr.crit.k]} : ${fmt(pr.owned.size)} joueur(s) de ta collection` : 'liste fut.gg'} · ${all.length} joueurs listés (équipe la moins chère fut.gg)`;
-      } else
-        this.subEl.textContent = {
-          snipe: 'Achète sous le prix du marché et revend avec profit, sans interruption',
-          gallery: `${a.setList().length} set(s) importé(s) depuis fut.gg`,
-          sales: 'Profits du sniper, coût de la Galerie, liste de transferts',
-          log: 'Toutes les actions, du sniper et de la Galerie',
-          settings: 'Appliqués immédiatement, y compris pendant une tâche',
-        }[this.tab];
-      this.syncBtn.style.display = this.tab === 'gallery' ? '' : 'none';
-      const at = set ? set.syncedAt : a.gallerySyncAt;
-      this.syncBtn.textContent = this.syncing ? 'Synchronisation…' : at ? `↻ Synchronisé ${ago(at)}` : '↻ Non synchronisé';
-      this.syncBtn.title = 'Relire chez EA les cartes collectées';
-      this.syncBtn.disabled = this.syncing || a.running;
+      this.eyebrowEl.textContent = X.APP;
+      this.titleEl.textContent = Object.fromEntries(TABS)[this.tab];
+      this.subEl.textContent = {
+        snipe: 'Achète sous le prix du marché et revend avec profit, sans interruption',
+        gallery: `${a.setList().length} set(s) importé(s) depuis fut.gg · vue complète dans la Web App`,
+        sales: 'Profits du sniper, coût de la Galerie, liste de transferts',
+        log: 'Toutes les actions, du sniper et de la Galerie',
+        settings: 'Appliqués immédiatement, y compris pendant une tâche',
+      }[this.tab];
       const c = X.coins();
       this.coinsEl.textContent = c == null ? '' : `${fmt(c)} crédits`;
       for (const [k, b] of Object.entries(this.navBtns)) b.classList.toggle('active', k === this.tab);
@@ -570,7 +509,7 @@
       const lockAt = s.guard.lockedUntil();
       if (a.running) {
         const left = a.waitUntil - now;
-        const what = a.mode === 'buy' ? 'Achats Galerie' : a.mode === 'scan' ? 'Scan du club' : 'Vérification des prix';
+        const what = a.mode === 'buy' ? 'Achats Galerie' : a.mode === 'gallery' ? 'Galerie' : 'Vérification des prix';
         return `${what} · ${left > 0 ? `${a.waitLabel || 'Prochaine action'} dans ${fmtWait(left)}` : a.activityText || 'en cours…'}`;
       }
       if (s.running && s.task === 'relist') return `Relister · ${s.relistProgress ? `${s.relistProgress.done} / ${s.relistProgress.total} · ` : ''}${s.activity}`;
@@ -587,10 +526,6 @@
       this.stripText.textContent = txt;
       this.launchSub.textContent = txt || (this.sniper.on ? 'Sniper : reprise imminente' : 'à l’arrêt');
       if (this.isOpen && this.tab === 'snipe') this.renderSnipeLive();
-      if (this.isOpen && this.tab === 'gallery' && this.setKey === null && !this.syncing) {
-        const at = this.album.gallerySyncAt;
-        this.syncBtn.textContent = at ? `↻ Synchronisé ${ago(at)}` : '↻ Non synchronisé';
-      }
     }
     renderBody() {
       const top = this.body.scrollTop;
@@ -598,7 +533,7 @@
       if (tab === 'snipe') {
         this.renderSnipe();
         if (this.body.firstChild !== this.snipeSec) this.body.replaceChildren(this.snipeSec);
-      } else if (tab === 'gallery') this.setKey && this.album.sets[this.setKey] ? this.renderSet() : ((this.setKey = null), this.renderHome());
+      } else if (tab === 'gallery') this.renderGallery();
       else if (tab === 'sales') {
         this.renderSales();
         if (this.body.firstChild !== this.salesSec) this.body.replaceChildren(this.salesSec);
@@ -608,7 +543,7 @@
         this.renderSettings();
         if (this.body.firstChild !== this.settingsSec) this.body.replaceChildren(this.settingsSec);
       }
-      if (tab !== 'gallery' || (!this.setKey && !this.homeSel.size)) this.actionbar.classList.add('hidden');
+      this.actionbar.classList.add('hidden');
       this.body.scrollTop = top;
     }
 
@@ -732,7 +667,7 @@
               if (!snipe) row.onclick = () => this.app.setActiveTarget(i);
               return row;
             })
-          : [h('div', { className: 'a-empty', textContent: 'Aucune cible. Cherche un joueur, copie le filtre de la Web App, ou ajoute des cartes manquantes depuis l’onglet Galerie (🎯).' })]),
+          : [h('div', { className: 'a-empty', textContent: 'Aucune cible. Cherche un joueur, copie le filtre de la Web App, ou envoie des cartes manquantes depuis la Galerie de la Web App (🎯).' })]),
       );
       this.tClear.style.display = list.some((f) => f.album) ? '' : 'none';
       this.tClear.disabled = snipe;
@@ -870,19 +805,61 @@
     }
 
     // ================= Galerie =================
+    // Vue complète dans la Web App (tuile « Galerie » du hub) ; ici : résumé, catalogue fut.gg, accès direct
 
-    openSet(key) {
-      this.setKey = key;
-      this.page = 0;
-      this.text = '';
-      this.tab = 'gallery';
-      this.body.scrollTop = 0;
-      this.renderAll();
-      if (key) {
-        const s = this.album.sets[key];
-        const stale = !s?.syncedAt || Date.now() - s.syncedAt > 5 * 6e4 || Object.values(s.players ?? {}).some((p) => !this.album.itemData.has(p.defId));
-        if (stale && !this.album.running && !this.synced.get(key)) void this.syncCurrent();
-      }
+    openGallery(key, grade) {
+      if (X.gallery.open(key, grade)) return this.close();
+      this.album.log('Galerie : ouvre l’accueil de la Web App puis réessaie (navigation introuvable)', 'warn');
+    }
+    renderGallery() {
+      const a = this.album;
+      const sets = X.gallery.sets();
+      const ov = X.gallery.overview();
+      const c = a.catalog;
+      const rows = (list, sub) =>
+        list.length
+          ? h(
+              'div',
+              { className: 'a-hits', style: 'max-height:none' },
+              ...list.map((e) =>
+                h(
+                  'div',
+                  { className: 'a-hit pick', onclick: () => this.openGallery(e.set.key, e.grade) },
+                  h('span', { className: 'n' }, e.set.name, h('span', { className: 'm', textContent: ` · ${sub(e)}` })),
+                  e.cost != null ? h('span', { className: 'm ac', textContent: `${fmt(e.cost)} crédits` }) : h('span'),
+                ),
+              ),
+            )
+          : null;
+      const wrap = h(
+        'div',
+        { className: 'a-sec' },
+        block(
+          'Galerie (vue Web App)',
+          hint('Accueil de la Web App > tuile « Galerie » : sets par rubrique, joueurs de chaque set lus chez EA (score de grade de chaque carte, statut collecté), bonus de tags, plan le moins cher par grade, « Tout synchroniser ». Achat direct et sniper depuis le panneau du set.'),
+          h('div', { className: 'a-row' }, btn('Ouvrir la Galerie', () => this.openGallery(), 'primary', { disabled: !sets.length })),
+        ),
+        h(
+          'div',
+          { className: 'tiles' },
+          tile('Score de Galerie', `${fmt(ov.score)}${ov.partial ? '+' : ''}`, 'estimé, dernière synchro de chaque set'),
+          tile('Sets synchronisés', `${ov.synced} / ${ov.totalSets}`, ''),
+          ov.tokensTotal ? tile('Jetons gagnés', `${fmt(ov.tokens)} / ${fmt(ov.tokensTotal)}`, 'grades de set') : null,
+        ),
+        ov.nextTokens.length ? block('Prochains grades les moins chers', rows(ov.nextTokens.slice(0, 6), (e) => `grade ${e.grade}${e.tokens ? `, +${e.tokens} jetons` : ''}, ${e.buys} à acheter`)) : null,
+        ov.closest.length ? block('Les plus proches d’être complets', rows(ov.closest.slice(0, 6).map((e) => ({ ...e, cost: null })), (e) => `${e.collected}${e.partial ? '+' : ''} / ${e.required}`)) : null,
+        block(
+          'Catalogue fut.gg',
+          hint(c.busy ? c.text : `${sets.length} set(s) · ${c.at ? `catalogue lu ${ago(c.at)}` : 'catalogue jamais lu'}${this.cfg.autoCatalog ? ' · relu à l’ouverture (toutes les 6 h)' : ''}`),
+          h(
+            'div',
+            { className: 'a-row' },
+            btn(c.busy ? 'Catalogue fut.gg…' : '↻ Réimporter tous les sets', () => a.requestCatalog(true), 'small', { disabled: c.busy }),
+            btn('+ Importer un set fut.gg', () => window.open(FUTGG_GALLERY, '_blank', 'noopener'), 'small', { title: `Ouvre un set de la Galerie sur fut.gg, puis clique « Envoyer à ${X.APP} »` }),
+          ),
+        ),
+      );
+      this.body.replaceChildren(wrap);
     }
     async refreshCoins() {
       if (this.coinsBtn.disabled) return;
@@ -893,580 +870,18 @@
       this.coinsBtn.disabled = false;
       this.update();
     }
-    async syncCurrent() {
-      const key = this.setKey;
-      if (this.album.running) return this.album.log('Lecture de la Galerie EA : attendre la fin de la tâche en cours');
-      this.synced.set(key ?? '*', true);
-      this.syncing = true;
-      this.renderHead();
-      await this.album.syncGallery(key ? [key] : undefined);
-      this.syncing = false;
-      this.synced.set(key ?? '*', false);
-      this.renderAll();
-    }
-    renderHome() {
-      if (!this.homeWrap) {
-        this.homeSearch = h('input', { type: 'search', className: 'a-in', placeholder: 'Rechercher un set ou un joueur', style: 'flex:1;min-width:200px' });
-        this.homeSearch.oninput = () => {
-          this.homeText = norm(this.homeSearch.value.trim());
-          this.renderHomeContent();
-        };
-        this.homeSeg = h('div', { className: 'a-tabs' });
-        this.homePickAll = h('button', { type: 'button', className: 'a-link' });
-        this.homeContent = h('div', { className: 'a-sec', style: 'max-width:none' });
-        this.homeWrap = h('div', {}, h('div', { className: 'a-ctl' }, this.homeSeg, this.homeSearch, this.homePickAll), this.homeContent);
-      }
-      if (this.body.firstChild !== this.homeWrap) this.body.replaceChildren(this.homeWrap);
-      this.renderHomeContent();
-    }
-    renderHomeContent() {
-      const a = this.album;
-      const t = this.homeText;
-      const targets = new Set(this.app.targets().filter((f) => f.album).map((f) => f.defId));
-      const info = a.setList().map((s) => {
-        const all = a.setPlayers(s);
-        const pr = a.progress(s);
-        // missing : joueurs listés à acheter pour combler les places libres (vide si le set est rempli)
-        const missing = pr.have < pr.slots ? all.filter((p) => !p.collected) : [];
-        return { s, all, pr, missing, hits: t ? all.filter((p) => norm(p.name).includes(t)) : [], nameHit: !t || norm(s.name).includes(t) };
-      });
-      // Sets complétés ou retirés : plus cochables
-      const byKey = new Map(info.map((x) => [x.s.key, x]));
-      for (const k of [...this.homeSel]) if (!byKey.get(k)?.missing.length || !a.toFinish(byKey.get(k).s).length) this.homeSel.delete(k);
-      const counts = { all: info.length, todo: info.filter((x) => x.missing.length).length, done: info.filter((x) => !x.missing.length).length };
-      this.homeSeg.replaceChildren(
-        ...[
-          ['all', 'Tous'],
-          ['todo', 'Incomplets'],
-          ['done', 'Complets'],
-        ].map(([id, label]) => h('button', { type: 'button', className: this.homeFilter === id ? 'active' : '', textContent: `${label} ${counts[id]}`, onclick: () => ((this.homeFilter = id), this.renderHomeContent()) })),
-      );
-      const shown = info.filter((x) => (this.homeFilter === 'all' || (this.homeFilter === 'todo') === x.missing.length > 0) && (x.nameHit || x.hits.length));
-      const pickable = shown.filter((x) => x.missing.length);
-      const allPicked = pickable.length > 0 && pickable.every((x) => this.homeSel.has(x.s.key));
-      this.homePickAll.textContent = allPicked ? 'Décocher les sets affichés' : `Cocher les ${pickable.length} set(s) incomplet(s) affiché(s)`;
-      this.homePickAll.disabled = !pickable.length;
-      this.homePickAll.onclick = () => {
-        for (const x of pickable) allPicked ? this.homeSel.delete(x.s.key) : this.homeSel.add(x.s.key);
-        this.renderHomeContent();
-      };
-      const tiles = shown.map(({ s, all, pr, missing, hits }) => {
-        const got = pr.have;
-        const left = a.toFinish(s).reduce((n, p) => n + (p.minPrice || 0), 0);
-        const sel = missing.filter((p) => a.isSelected(p.defId)).length;
-        const tg = missing.filter((p) => targets.has(p.defId)).length;
-        const picked = this.homeSel.has(s.key);
-        return h(
-          'div',
-          { className: `a-tile${picked ? ' picked' : ''}`, onclick: () => this.openSet(s.key) },
-          h(
-            'div',
-            { className: 'a-tile-top' },
-            missing.length
-              ? h('span', {
-                  className: `a-check${picked ? ' on' : ''}`,
-                  textContent: '✓',
-                  title: picked ? 'Retirer de la sélection de sets' : 'Cocher pour faire plusieurs sets d’un coup',
-                  onclick: (ev) => {
-                    ev.stopPropagation();
-                    picked ? this.homeSel.delete(s.key) : this.homeSel.add(s.key);
-                    this.renderHomeContent();
-                  },
-                })
-              : null,
-            h('span', { className: 'a-tile-name', textContent: s.name, title: s.name }),
-            s.url ? h('button', { type: 'button', className: 'a-x', textContent: '↗', title: 'Ouvrir sur fut.gg (renvoyer pour mettre à jour)', onclick: (ev) => (ev.stopPropagation(), window.open(s.url, '_blank', 'noopener')) }) : null,
-            h('button', { type: 'button', className: 'a-x', textContent: '×', title: 'Retirer le set', disabled: a.running, onclick: (ev) => (ev.stopPropagation(), confirm(`Retirer le set « ${s.name} » ?`) && a.removeSet(s.key)) }),
-          ),
-          h(
-            'div',
-            { className: 'a-tile-stats' },
-            h('span', { textContent: `${pr.slots} places${s.needed ? '' : ' ?'}`, title: s.needed ? 'Joueurs requis lus sur fut.gg' : 'Nombre de joueurs requis non lu sur fut.gg : taille de la liste fut.gg (« ↻ Réimporter » pour relire)' }),
-            gradePill(a.gradeOf(s)),
-            pr.crit ? h('span', { className: 'a-pill', title: 'Critère déduit des joueurs listés par fut.gg : tout joueur de ta collection qui le remplit compte', textContent: `${X.CRIT_LABEL[pr.crit.k]} · ${fmt(pr.owned.size)} à toi` }) : h('span', { className: 'a-pill', title: 'Critère non reconnu : seuls les joueurs listés par fut.gg comptent', textContent: 'liste fut.gg' }),
-            left ? h('span', { textContent: `manquants ~${fmt(left)} crédits` }) : null,
-            hits.length ? h('span', { className: 'a-pill ac', textContent: `${hits.length} joueur(s) trouvé(s)` }) : null,
-            sel ? h('span', { className: 'a-pill ac', textContent: `${sel} sélectionné(s)` }) : null,
-            tg ? h('span', { className: 'a-pill', style: 'color:var(--warn);border-color:rgba(255,179,71,.4)', textContent: `🎯 ${tg} ciblé(s)` }) : null,
-          ),
-          h('div', { className: 'a-bar' }, h('span', { style: `width:${pr.slots ? (got / pr.slots) * 100 : 0}%` })),
-          h('div', { className: 'a-tile-foot' }, h('span', { style: 'color:#dfe4ec;font-weight:400', textContent: `Remplies ${got} / ${pr.slots}` }), h('span', { textContent: 'Voir les joueurs →' })),
-        );
-      });
-      const c = a.catalog;
-      const extra = t
-        ? []
-        : [
-            h(
-              'div',
-              { className: 'a-tile add', onclick: () => window.open(FUTGG_GALLERY, '_blank', 'noopener') },
-              h('b', { textContent: '+ Importer un set fut.gg' }),
-              hint(`Ouvre un set de la Galerie sur fut.gg, puis clique « Envoyer à ${X.APP} ».`),
-            ),
-            h(
-              'div',
-              { className: 'a-tile add', title: 'Lit tous les sets de la Galerie sur fut.gg (sets retirés à la main exclus)', onclick: () => a.requestCatalog(true) },
-              h('b', { textContent: c.busy ? 'Catalogue fut.gg…' : '↻ Réimporter tous les sets fut.gg' }),
-              hint(c.busy ? c.text : `${c.at ? `Catalogue lu ${ago(c.at)}` : 'Catalogue jamais lu'}${this.cfg.autoCatalog ? ' · relu à l’ouverture (toutes les 6 h)' : ''}`),
-            ),
-          ];
-      const intro = info.length
-        ? null
-        : h(
-            'div',
-            { className: 'a-empty' },
-            h('b', { style: 'color:#fff', textContent: 'Aucun set importé.' }),
-            h(
-              'ol',
-              {},
-              h('li', { textContent: 'Les sets de la Galerie fut.gg sont importés à l’ouverture (ou « ↻ Réimporter »), ou un par un avec « + Importer un set fut.gg ».' }),
-              h('li', { textContent: '« Scanner le club » : joueurs présents au club et passés (Galerie EA), puis sets proposés selon le solde.' }),
-              h('li', { textContent: 'Coche les sets puis « Faire les sets » : les cartes manquantes sont achetées au prix du marché, set par set. Ou « Sniper » (sous le prix du marché, revente avec profit).' }),
-            ),
-          );
-      const top = this.body.scrollTop;
-      this.homeContent.replaceChildren(
-        ...[
-          t.length >= 2 ? this.playerHits(info) : null,
-          !t && info.length ? this.levelBlock() : null,
-          !t && info.length ? this.proposalBlock() : null,
-          tiles.length || extra.length ? h('div', { className: 'a-grid' }, ...tiles, ...extra) : h('div', { className: 'a-empty', textContent: 'Aucun set ne correspond.' }),
-          intro,
-        ].filter(Boolean),
-      );
-      this.body.scrollTop = top;
-      this.renderHomeActionbar();
-    }
-    // Joueurs trouvés dans tous les sets : un clic sélectionne une carte manquante, ↗ ouvre son set
-    playerHits(info) {
-      const a = this.album;
-      const seen = new Map();
-      for (const { s, hits } of info) for (const p of hits) if (!seen.has(p.defId)) seen.set(p.defId, { p, sets: [s] });
-      else seen.get(p.defId).sets.push(s);
-      const list = [...seen.values()].sort((x, y) => Number(x.p.collected) - Number(y.p.collected) || (y.p.rating || 0) - (x.p.rating || 0));
-      if (!list.length) return block('Joueurs', h('div', { className: 'a-empty', textContent: 'Aucun joueur ne correspond.' }));
-      const rows = list.slice(0, 60).map(({ p, sets }) => {
-        const sel = !p.collected && a.isSelected(p.defId);
-        const price = Number(a.selection[p.defId]) || p.minPrice || 0;
-        const row = h(
-          'div',
-          { className: `a-hit${p.collected || a.running ? '' : ' pick'}`, title: sets.map((x) => x.name).join(', ') },
-          p.collected ? h('span', { className: 'ok', textContent: '✓' }) : h('span', { className: `a-check${sel ? ' on' : ''}`, textContent: '✓' }),
-          h('span', { className: 'n' }, p.rating ? h('i', { textContent: String(p.rating) }) : null, p.name, h('span', { className: 'm', textContent: ` · ${sets[0].name}${sets.length > 1 ? ` +${sets.length - 1}` : ''}` })),
-          h('span', { className: `m${p.collected ? ' ok' : sel ? ' ac' : ''}`, textContent: p.collected ? 'Collecté' : price ? `${fmt(price)} crédits` : 'sans prix' }),
-          h('button', { type: 'button', className: 'a-x', textContent: '↗', title: 'Ouvrir le set', onclick: (ev) => (ev.stopPropagation(), this.openSet(sets[0].key)) }),
-        );
-        if (!p.collected && !a.running)
-          row.onclick = () => {
-            a.setSelected(p.defId, !sel);
-            a.touch();
-            this.renderHomeContent();
-          };
-        return row;
-      });
-      return block(`Joueurs (${list.length}${list.length > 60 ? ', 60 premiers' : ''})`, hint('Touche un joueur manquant pour le sélectionner ; il est acheté ou snipé avec les sets cochés ou depuis son set.'), h('div', { className: 'a-hits' }, ...rows));
-    }
-    // Sets à faire : coût pour finir chaque set incomplet, sets proposés (les moins chers qui tiennent ensemble dans le solde)
-    proposalBlock() {
-      const a = this.album;
-      const coins = X.coins();
-      const prop = a.proposedSets();
-      const rank = new Map(prop.map((x, i) => [x.key, i]));
-      const rows = a
-        .setList()
-        .map((s) => {
-          const cards = a.toFinish(s);
-          return { s, cards, spend: cards.reduce((t, p) => t + a.priceOf(p), 0), unpriced: cards.filter((p) => !a.priceOf(p)).length };
-        })
-        .filter((x) => x.cards.length)
-        .sort((x, y) => (rank.get(x.s.key) ?? Infinity) - (rank.get(y.s.key) ?? Infinity) || x.unpriced - y.unpriced || x.spend - y.spend);
-      const scan = btn(a.mode === 'scan' ? 'Scan en cours…' : '⟳ Scanner le club', () => void this.scanClub(), 'small primary', {
-        disabled: a.running,
-        title: 'Lit les joueurs présents au club, puis le statut « collecté » de tous les joueurs du jeu chez EA (joueurs passés au club, 200 par page, quelques minutes), et propose les sets faisables avec le solde. Le sniper est suspendu pendant le scan.',
-      });
-      const diag = h('button', { type: 'button', className: 'a-link', textContent: 'Copier le diagnostic', title: 'Copie dans le presse-papiers ce que l’extension lit chez EA (Galerie, club, statut collecté), pour corriger la synchro', onclick: () => void this.copyDiag(diag) });
-      const head = h('div', { className: 'a-row' }, h('span', { className: 'a-block-title a-grow', textContent: `Sets à faire (${rows.length})` }), diag, scan);
-      const spend = prop.reduce((t, x) => t + x.spend, 0);
-      const info = hint(
-        `${a.clubAt ? `Club scanné ${ago(a.clubAt)} (${fmt(a.clubIds.size)} joueurs)` : 'Club jamais scanné'} · collection connue ${fmt(a.coll.size)} joueur(s) · ${
-          coins === null ? 'solde inconnu' : `${prop.length} set(s) faisable(s) avec ${fmt(coins)} crédits${prop.length ? ` (~${fmt(spend)})` : ''}`
-        }`,
-      );
-      if (!rows.length) return h('div', { className: 'a-block' }, head, info, h('div', { className: 'a-empty', textContent: 'Tous les sets importés sont complets.' }));
-      const allProp = prop.length > 0 && prop.every((x) => this.homeSel.has(x.key));
-      const pick = h('button', {
-        type: 'button',
-        className: 'a-link',
-        textContent: allProp ? 'Sets proposés cochés' : `Cocher les ${prop.length} set(s) proposé(s)`,
-        disabled: !prop.length || allProp || a.running,
-        onclick: () => {
-          this.homeSel = new Set(prop.map((x) => x.key));
-          this.renderHomeContent();
-        },
-      });
-      const shown = this.propAll ? rows : rows.slice(0, 10);
-      const list = shown.map(({ s, cards, spend: v, unpriced }) => {
-        const on = this.homeSel.has(s.key);
-        const ok = rank.has(s.key);
-        const pr = a.progress(s);
-        const req = ` · ${pr.have} / ${pr.slots} places`;
-        return h(
-          'div',
-          {
-            className: `a-hit${a.running ? '' : ' pick'}`,
-            title: cards.map((p) => `${p.name}${a.priceOf(p) ? ` · ${fmt(a.priceOf(p))}` : ' · sans prix'}`).join('\n'),
-            onclick: () => {
-              if (a.running) return;
-              on ? this.homeSel.delete(s.key) : this.homeSel.add(s.key);
-              this.renderHomeContent();
-            },
-          },
-          h('span', { className: `a-check${on ? ' on' : ''}`, textContent: '✓' }),
-          h('span', { className: 'n' }, s.name, h('span', { className: 'm', textContent: ` · ${cards.length} carte(s) à acheter${req}` })),
-          h('span', {
-            className: `m ${ok ? 'ok' : unpriced || (coins !== null && v > coins) ? 'warn' : ''}`,
-            textContent: `${v ? `~${fmt(v)}` : ''}${unpriced ? `${v ? ' + ' : ''}${unpriced} sans prix` : ''}${ok ? ' · proposé' : coins !== null && v > coins ? ' · au-delà du solde' : ''}`,
-          }),
-          h('button', { type: 'button', className: 'a-x', textContent: '↗', title: 'Voir les joueurs du set', onclick: (ev) => (ev.stopPropagation(), this.openSet(s.key)) }),
-        );
-      });
-      const more =
-        rows.length > 10
-          ? h('button', { type: 'button', className: 'a-link', textContent: this.propAll ? 'Réduire' : `Voir les ${rows.length} sets`, onclick: () => ((this.propAll = !this.propAll), this.renderHomeContent()) })
-          : null;
-      return h(
-        'div',
-        { className: 'a-block' },
-        head,
-        info,
-        hint('Proposés : les sets les moins chers à finir qui tiennent ensemble dans le solde (joueur commun à plusieurs sets acheté une fois). Coche les sets puis « Faire les sets » : les cartes manquantes sont achetées au prix du marché, set par set, du moins cher au plus cher.'),
-        h('div', { className: 'a-row' }, pick, h('span', { className: 'a-grow' }), more),
-        h('div', { className: 'a-hits', style: 'max-height:none' }, ...list),
-      );
-    }
-    // Objectif niveau Galerie : cartes qui rapportent le plus de points estimés par crédit, jusqu'au score visé
-    levelPlan() {
-      const a = this.album;
-      const cfg = this.cfg;
-      const est = a.estimatedScore();
-      const live = X.galleryLive?.score || 0;
-      const current = cfg.levelScore || live || est;
-      const need = Math.max(0, cfg.levelTarget - current);
-      const coins = X.coins();
-      const budget = cfg.levelBudget || coins || 0;
-      return { est, live, current, need, budget, coins, plan: need && budget ? a.planLevel(need, budget) : { picks: [], spend: 0, gain: 0, cost: 0, candidates: 0 } };
-    }
-    levelBlock() {
-      const a = this.album;
-      const cfg = this.cfg;
-      const L = this.levelPlan();
-      const { plan } = L;
-      const num = (key, value, placeholder, title) => {
-        const i = h('input', { type: 'number', className: 'a-in', min: '0', step: '1000', value: value ? String(value) : '', placeholder, title, style: 'width:130px;text-align:right' });
-        i.onchange = () => {
-          this.app.setConfig({ [key]: Math.max(0, Math.floor(Number(i.value) || 0)) });
-          this.renderHomeContent();
-        };
-        return i;
-      };
-      const field = (label, input) => h('label', { className: 'a-row', style: 'gap:.4rem;font-size:.75rem;color:var(--dim)' }, label, input);
-      const inputs = h(
-        'div',
-        { className: 'a-row', style: 'gap:.5rem 1rem' },
-        field('Score actuel', num('levelScore', cfg.levelScore, fmt(L.live || L.est), 'Score Galerie affiché dans le jeu. Vide : score lu dans la Web App, sinon estimé.')),
-        field('Objectif', num('levelTarget', cfg.levelTarget, '3000000', 'Niveau 10 : ~3 000 000 points (estimation des joueurs, EA n’a pas publié le barème)')),
-        field('Budget', num('levelBudget', cfg.levelBudget, L.coins == null ? 'solde' : fmt(L.coins), 'Crédits engagés au plus. Vide : le solde.')),
-      );
-      const src = cfg.levelScore ? 'saisi' : L.live ? 'lu dans la Web App, à vérifier' : 'estimé sur les sets importés, sans bonus de tags';
-      const pct = L.need ? Math.min(100, Math.round((100 * plan.gain) / L.need)) : 100;
-      const reach = L.need && plan.gain >= L.need;
-      const keep = cfg.afterBuy === 'keep';
-      const status = !L.need
-        ? h('div', { className: 'a-block-hint', style: 'color:var(--ok)', textContent: `Objectif atteint (${fmt(L.current)} points, ${src}).` })
-        : h(
-            'div',
-            { className: 'a-proj' },
-            h('span', {}, 'Manque ', h('b', { textContent: fmt(L.need) }), ` (score ${fmt(L.current)}, ${src})`),
-            plan.picks.length ? h('span', {}, `plan ${plan.picks.length} carte(s) · `, h('b', { textContent: `+${fmt(plan.gain)}` }), ` points (${pct} %)`) : null,
-            plan.picks.length ? h('span', {}, 'engagés ', h('b', { textContent: `~${fmt(plan.spend)}` })) : null,
-            plan.picks.length ? h('span', {}, `coût réel${keep ? ' (club)' : ''} `, h('b', { className: 'neg', textContent: `~${fmt(plan.cost)}` })) : null,
-            plan.picks.length && !reach ? h('span', { className: 'warn', textContent: 'budget insuffisant : relancer après les ventes' }) : null,
-          );
-      const shown = this.levelAll ? plan.picks : plan.picks.slice(0, 8);
-      const rows = shown.map(({ p, price, gain, keys }) =>
-        h(
-          'div',
-          { className: 'a-hit', title: keys.map((k) => a.sets[k]?.name).filter(Boolean).join('\n') },
-          h('span', { className: 'ac', textContent: `+${fmt(gain)}` }),
-          h('span', { className: 'n' }, p.rating ? h('i', { textContent: String(p.rating) }) : null, p.name, h('span', { className: 'm', textContent: ` · ${keys.length} set(s)` })),
-          h('span', { className: 'm', textContent: `${fmt(price)} · ${fmt(Math.round((gain / price) * 1e3))} pts / 1k` }),
-          h('button', { type: 'button', className: 'a-x', textContent: '↗', title: 'Ouvrir le set', onclick: () => this.openSet(keys[0]) }),
-        ),
-      );
-      const more = plan.picks.length > 8 ? h('button', { type: 'button', className: 'a-link', textContent: this.levelAll ? 'Réduire' : `Voir les ${plan.picks.length} cartes`, onclick: () => ((this.levelAll = !this.levelAll), this.renderHomeContent()) }) : null;
-      const go = btn(a.mode === 'buy' ? 'Achats en cours…' : `Acheter le plan (${plan.picks.length})`, () => void this.runLevel(), 'small primary', {
-        disabled: !plan.picks.length || a.running,
-        title: 'Achète au prix du marché les cartes du plan, de la plus rentable à la moins rentable, puis les traite selon « Après achat ». Le sniper est suspendu pendant les achats puis reprend.',
-      });
-      const snipe = btn(`🎯 Sniper le plan`, () => this.app.snipeSelection(plan.picks.map((x) => x.p.defId)), 'small', { disabled: !plan.picks.length, title: 'Les cartes du plan deviennent des cibles du sniper : achat sous le prix du marché, plus lent' });
-      return h(
-        'div',
-        { className: 'a-block' },
-        h('div', { className: 'a-row' }, h('span', { className: 'a-block-title a-grow', textContent: 'Objectif niveau Galerie' }), snipe, go),
-        inputs,
-        status,
-        rows.length ? h('div', { className: 'a-hits', style: 'max-height:none' }, ...rows) : null,
-        more,
-        hint(
-          'Points estimés : barème des joueurs (or 75 = 90 … 85 = 2 100, 90 = 14 000, 99 = 100 000 ; argent 35 ; bronze 20), non publié par EA. Une carte compte dans chaque set importé où elle entre ou remplace une carte plus faible. Une carte achetée n’a pas le tag First Owner et les bonus de tags ne sont pas comptés. Après les achats, placer les cartes dans les sets du jeu (remplissage automatique de chaque set) : le score reste acquis même après la revente.',
-        ),
-      );
-    }
-    async runLevel() {
-      const a = this.album;
-      if (a.running) return;
-      const { plan, coins } = this.levelPlan();
-      if (!plan.picks.length) return;
-      if (coins !== null && plan.spend > coins && !confirm(`Solde ${fmt(coins)} pour ~${fmt(plan.spend)} crédits engagés. Les cartes les plus rentables passent d’abord ; ensuite les achats attendent les ventes en cours, ou s’arrêtent faute de crédits. Lancer ?`)) return;
-      const ids = plan.picks.map((x) => x.p.defId);
-      this.openBuy([...new Set(plan.picks.flatMap((x) => x.keys))]);
-      await this.runBuy(ids, () => a.buyLevel(plan.picks));
-    }
-    async copyDiag(el) {
-      const a = this.album;
-      const sets = a.setList();
-      const withAttrs = [...a.coll.values()].filter((x) => x.l || x.c || x.n).length;
-      const first = [...a.itemData.values()][0];
-      const out = {
-        version: X.VERSION,
-        at: new Date().toISOString(),
-        sets: sets.length,
-        collection: { total: a.coll.size, withAttrs, club: a.clubIds.size, clubAt: a.clubAt, done: a.done.size },
-        netCollected: [...X.netItems.values()].filter((x) => x.collected).length,
-        galleryLive: X.galleryLive,
-        defidSample: first ? { keys: Object.keys(first), item: first } : null,
-        clubSample: a.clubSample ?? null,
-        setsSample: sets.slice(0, 40).map((s) => {
-          const pr = a.progress(s);
-          return { name: s.name, url: s.url, needed: s.needed, listed: Object.keys(s.players ?? {}).length, crit: pr.crit ? { k: pr.crit.k, v: [...pr.crit.v], tier: pr.crit.tier } : null, owned: pr.owned.size, slots: pr.slots };
-        }),
-        galleryResponses: X.galleryDiag,
-      };
-      const ok = await copyText(JSON.stringify(out, null, 1));
-      el.textContent = ok ? 'Diagnostic copié' : 'Copie impossible';
-      setTimeout(() => (el.textContent = 'Copier le diagnostic'), 3e3);
-    }
-    async scanClub() {
-      const a = this.album;
-      if (a.running) return;
-      if (await a.scanClub()) this.homeSel = new Set(a.proposedSets().map((x) => x.key));
-      this.renderAll();
-    }
-    // Sets cochés : cartes à acheter pour les finir, achat direct lancé tout de suite (progression dans la fenêtre d'achat)
-    async completeSets(keys) {
-      const a = this.album;
-      if (a.running) return;
-      const plan = a.planSets(keys);
-      const ids = plan.flatMap((x) => x.cards.map((p) => p.defId));
-      if (!ids.length) return a.log('Sets cochés déjà complets : rien à acheter');
-      const spend = plan.reduce((t, x) => t + x.spend, 0);
-      const c = X.coins();
-      if (c !== null && spend > c && !confirm(`Solde ${fmt(c)} pour ~${fmt(spend)} crédits nécessaires. Les sets les moins chers passent d’abord ; ensuite les achats attendent les ventes en cours, ou s’arrêtent faute de crédits. Lancer ?`)) return;
-      this.homeSel.clear();
-      const order = plan.map((x) => x.key);
-      this.openBuy(order);
-      await this.runBuy(ids, () => a.completeSets(order));
-    }
-    // Plusieurs sets cochés : cartes à acheter pour les finir, en un clic (ou sniper)
-    renderHomeActionbar() {
-      const a = this.album;
-      const keys = [...this.homeSel];
-      if (!keys.length) return this.actionbar.classList.add('hidden');
-      const plan = a.planSets(keys);
-      const ids = plan.flatMap((x) => x.cards.map((p) => p.defId));
-      const sum = (f) => plan.reduce((t, x) => t + f(x), 0);
-      const spend = sum((x) => x.spend);
-      const cost = sum((x) => x.cost);
-      const unpriced = sum((x) => x.unpriced);
-      const c = X.coins();
-      const over = c !== null && spend > c;
-      const keep = this.cfg.afterBuy === 'keep';
-      this.actionbar.classList.remove('hidden');
-      this.actionbar.replaceChildren(
-        h(
-          'div',
-          { className: 'a-row a-grow' },
-          h('span', { className: 'a-count', textContent: `${keys.length} set(s) coché(s)` }),
-          h(
-            'span',
-            { className: 'a-proj' },
-            h('span', {}, `${ids.length} carte(s) · achat `, h('b', { textContent: `~${fmt(spend)}` })),
-            h('span', {}, `coût réel${keep ? ' (club)' : ''} `, h('b', { className: cost > 0 ? 'neg' : 'pos', textContent: cost < 0 ? `+${fmt(-cost)}` : `~${fmt(cost)}` })),
-            unpriced ? h('span', { className: 'dim', textContent: `+ ${unpriced} sans prix` }) : null,
-            over ? h('span', { className: 'warn', textContent: `solde ${fmt(c)} insuffisant` }) : null,
-          ),
-        ),
-        h(
-          'div',
-          { className: 'a-row' },
-          btn('Décocher', () => (this.homeSel.clear(), this.renderHomeContent(), this.actionbar.classList.add('hidden')), 'ghost'),
-          btn(`🎯 Sniper (${ids.length})`, () => (this.homeSel.clear(), this.app.snipeSelection(ids)), '', {
-            disabled: !ids.length,
-            title: 'Les cartes à acheter des sets cochés deviennent des cibles du sniper (alternance) : achat sous le prix du marché, revente avec profit.',
-          }),
-          btn('Ajuster…', () => {
-            for (const id of ids) a.setSelected(id, true);
-            this.openBuy(plan.map((x) => x.key));
-          }, '', { disabled: !ids.length || a.running, title: 'Ouvre la fenêtre d’achat : prix de départ, cartes, écart max, après achat' }),
-          btn(a.mode === 'buy' ? 'Achats en cours…' : `Faire ${keys.length > 1 ? `les ${keys.length} sets` : 'le set'}`, () => void this.completeSets(keys), 'primary', {
-            disabled: !ids.length || a.running,
-            title: 'Achète au prix du marché les cartes qui manquent pour finir les sets cochés, set par set du moins cher au plus cher, puis les traite selon « Après achat ». Le sniper est suspendu pendant les achats puis reprend.',
-          }),
-        ),
-      );
-    }
-    renderSet() {
-      const a = this.album;
-      const set = a.sets[this.setKey];
-      const all = a.setPlayers(set);
-      const queue = new Map(a.queue.map((q) => [q.defId, q]));
-      const lists = { all, collected: all.filter((p) => p.collected), missing: all.filter((p) => !p.collected) };
-      const tabs = h(
-        'div',
-        { className: 'a-tabs' },
-        ...[
-          ['all', 'Tous'],
-          ['collected', 'Collectés'],
-          ['missing', 'Manquants'],
-        ].map(([id, label]) => h('button', { type: 'button', className: this.filter === id ? 'active' : '', textContent: `${label} ${lists[id].length}`, onclick: () => ((this.filter = id), (this.page = 0), this.renderBody()) })),
-      );
-      const search = h('input', { type: 'search', className: 'a-in', placeholder: 'Rechercher un joueur', value: this.text });
-      search.oninput = () => {
-        this.text = norm(search.value.trim());
-        this.page = 0;
-        this.renderGrid(lists, queue);
-      };
-      const selAll = btn('Tout sélectionner', () => {
-        for (const p of lists.missing) if (!a.isSelected(p.defId)) a.setSelected(p.defId, true);
-        this.renderBody();
-      }, 'small ghost', { disabled: a.running });
-      this.gridWrap = h('div');
-      this.body.replaceChildren(h('div', { className: 'a-ctl' }, tabs, search, h('span', { className: 'a-grow' }), selAll), this.gridWrap);
-      this.renderGrid(lists, queue);
-      this.renderActionbar(set);
-    }
-    renderGrid(lists, queue) {
-      const a = this.album;
-      const t = this.text;
-      const list = lists[this.filter].filter((p) => !t || norm(p.name).includes(t));
-      const pages = Math.max(1, Math.ceil(list.length / PAGE_CARDS));
-      this.page = Math.min(this.page, pages - 1);
-      const shown = list.slice(this.page * PAGE_CARDS, (this.page + 1) * PAGE_CARDS);
-      const targets = new Set(this.app.targets().filter((f) => f.album).map((f) => f.defId));
-      const cards = shown.map((p) => {
-        const sel = !p.collected && a.isSelected(p.defId);
-        const selectable = !p.collected && !a.running;
-        const q = queue.get(p.defId);
-        const card = h('div', { className: 'a-card' });
-        card.append(cardElement(p.defId, a.itemData.get(p.defId)) ?? h('div', { className: 'a-fallback', textContent: p.rating ? String(p.rating) : '?' }));
-        const price = Number(a.selection[p.defId]) || p.minPrice || 0;
-        const st = q && (!p.collected || q.price) ? rowStatus(q) : null;
-        const tg = targets.has(p.defId);
-        const node = h(
-          'div',
-          { className: `a-player${p.collected ? ' is-collected' : ''}${selectable ? ' is-selectable' : ''}${sel ? ' is-selected' : ''}` },
-          p.collected ? h('span', { className: 'a-got', textContent: '✓', title: 'Collecté' }) : h('span', { className: `a-pick${sel ? ' on' : ''}`, textContent: '✓' }),
-          tg && !p.collected ? h('span', { className: 'a-tgt', textContent: '🎯', title: 'Cible du sniper' }) : null,
-          card,
-          h('div', { className: 'a-pname', textContent: p.name, title: p.name }),
-          h('div', { className: 'a-price', textContent: p.collected ? 'Collecté' : price ? `${fmt(price)} crédits${a.selection[p.defId] && Number(a.selection[p.defId]) !== p.minPrice ? '' : ' · fut.gg'}` : 'sans prix' }),
-          st ? h('div', { className: `a-pstate ${st[1]}`, textContent: st[0] }) : null,
-          !p.collected
-            ? h('button', {
-                type: 'button',
-                className: `a-pbtn${tg ? ' on' : ''}`,
-                textContent: tg ? '🎯 Ciblé' : '🎯 Sniper',
-                title: tg ? 'Retirer des cibles du sniper' : 'Ajouter aux cibles du sniper : achat sous le prix du marché, revente avec profit',
-                onclick: (ev) => {
-                  ev.stopPropagation();
-                  tg ? this.app.removeAlbumTarget(p.defId) : this.app.addAlbumTargets([p.defId]);
-                  this.renderGrid(lists, queue);
-                },
-              })
-            : null,
-        );
-        if (selectable)
-          node.onclick = () => {
-            a.setSelected(p.defId, !a.isSelected(p.defId));
-            this.renderGrid(lists, queue);
-            this.renderActionbar(a.sets[this.setKey]);
-          };
-        return node;
-      });
-      const pager =
-        pages > 1
-          ? h(
-              'div',
-              { className: 'a-pager' },
-              btn('‹', () => ((this.page = Math.max(0, this.page - 1)), this.renderGrid(lists, queue)), 'small', { disabled: this.page === 0 }),
-              h('span', { textContent: `Page ${this.page + 1} sur ${pages}` }),
-              btn('›', () => ((this.page = Math.min(pages - 1, this.page + 1)), this.renderGrid(lists, queue)), 'small', { disabled: this.page >= pages - 1 }),
-            )
-          : null;
-      this.gridWrap.replaceChildren(cards.length ? h('div', { className: 'a-players' }, ...cards) : h('div', { className: 'a-empty', textContent: 'Aucun joueur ici.' }), pager ?? '');
-    }
-    selectedOf(set) {
-      return this.album.setPlayers(set).filter((p) => !p.collected && this.album.isSelected(p.defId));
-    }
-    // Barre du bas : deux façons de remplir la sélection
-    renderActionbar(set) {
-      const a = this.album;
-      const sel = this.selectedOf(set);
-      const pk = a.picks(sel.map((p) => String(p.defId)));
-      this.actionbar.classList.remove('hidden');
-      const keep = this.cfg.afterBuy === 'keep';
-      const proj = sel.length
-        ? h(
-            'div',
-            { className: 'a-proj' },
-            h('span', {}, 'Achat direct ', h('b', { textContent: `~${fmt(pk.spend)}` })),
-            h('span', {}, `coût réel${keep ? ' (club)' : ''} `, h('b', { className: pk.cost > 0 ? 'neg' : 'pos', textContent: pk.cost < 0 ? `+${fmt(-pk.cost)}` : `~${fmt(pk.cost)}` })),
-            pk.unpriced.length ? h('span', { className: 'dim', textContent: `+ ${pk.unpriced.length} sans prix` }) : null,
-            pk.fit < pk.list.length ? h('span', { className: 'warn', textContent: `solde : ${pk.fit} / ${pk.list.length} couverte(s)` }) : null,
-          )
-        : h('span', { className: 'a-proj', textContent: 'Touche les cartes manquantes pour les sélectionner.' });
-      this.actionbar.replaceChildren(
-        h('div', { className: 'a-row a-grow' }, h('span', { className: 'a-count', textContent: `${sel.length} sélectionné(s)` }), proj),
-        h(
-          'div',
-          { className: 'a-row' },
-          btn('Effacer', () => {
-            for (const p of sel) a.setSelected(p.defId, false);
-            this.renderBody();
-          }, 'ghost', { disabled: !sel.length || a.running }),
-          btn(`🎯 Sniper${sel.length ? ` (${sel.length})` : ''}`, () => this.app.snipeSelection(sel.map((p) => p.defId)), '', {
-            disabled: !sel.length,
-            title: 'Ajoute la sélection aux cibles du sniper et le lance (alternance des cibles) : achat sous le prix du marché, revente avec profit. Plus lent, gagne des crédits.',
-          }),
-          btn(a.mode === 'buy' ? 'Achats en cours…' : 'Acheter maintenant', () => this.openBuy(set.key), 'primary', {
-            disabled: !sel.length && a.mode !== 'buy',
-            title: 'Achat direct au prix du marché puis revente : rapide, coût = taxe EA 5 %',
-          }),
-        ),
-      );
-    }
-
     // --- Fenêtre « Acheter des cartes Galerie » ---
 
-    // keys : un set ou plusieurs (sets cochés de l'accueil Galerie)
-    openBuy(keys) {
+    // keys : un set ou plusieurs ; ids : cartes à acheter (sinon toutes les cartes cochées de ces sets)
+    openBuy(keys, ids) {
       const sets = [].concat(keys).map((k) => this.album.sets[k]).filter(Boolean);
       if (!sets.length) return;
       this.buyKeys = sets.map((x) => x.key);
       const key = this.buyKeys.join('|');
       this.buyKey = key;
       const running = this.album.running;
-      this.buyRows = running || (this.buyRan && this.buyRanKey === key) ? this.album.queue.map((q) => q.defId) : [...new Set(sets.flatMap((x) => this.selectedOf(x).map((p) => p.defId)))];
+      const picked = ids ?? sets.flatMap((x) => this.album.setPlayers(x).filter((p) => !p.collected && this.album.isSelected(p.defId)).map((p) => p.defId));
+      this.buyRows = running || (this.buyRan && this.buyRanKey === key) ? this.album.queue.map((q) => q.defId) : [...new Set(picked.map(Number))];
       if (!running && !(this.buyRan && this.buyRanKey === key)) this.buyRan = false;
       this.buyLayer.classList.add('open');
       this.renderBuy();
@@ -1987,7 +1402,7 @@
       this.renderStrip();
       const a = this.album;
       const s = this.sniper;
-      const sig = `${a.mode}|${a.version}|${this.setKey ? '' : `${a.catalog.text}|${X.coins()}|${X.galleryLive?.score}|${this.cfg.levelScore}|${this.cfg.levelTarget}|${this.cfg.levelBudget}|${this.cfg.afterBuy}`}|${s.running}|${s.task}|${s.idx}|${this.cfg.snipeFilters}|${this.cfg.rotate}`;
+      const sig = `${a.mode}|${a.version}|${a.catalog.text}|${s.running}|${s.task}|${s.idx}|${this.cfg.snipeFilters}|${this.cfg.rotate}`;
       if (sig !== this.lastSig && !this.typing()) {
         this.lastSig = sig;
         if (this.tab === 'gallery' || this.tab === 'snipe') this.renderBody();

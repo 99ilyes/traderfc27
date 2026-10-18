@@ -6,7 +6,17 @@
     if (e.data.stats) chrome.storage.local.set({ fc27Stats: e.data.stats });
     if (e.data.notify) chrome.runtime.sendMessage({ type: 'notify', ...e.data.notify }).catch(() => {});
     if (e.data.catalog) void syncCatalog(!!e.data.catalog.force);
+    if (e.data.prices) void fetchPrices(e.data.prices);
   });
+  // Prix fut.gg des cartes d'un set Galerie (vue Galerie) : réponse vide si fut.gg ne répond pas
+  async function fetchPrices({ id, ids }) {
+    let prices = {};
+    try {
+      const r = await chrome.runtime.sendMessage({ type: 'futgg-prices', ids: Array.isArray(ids) ? ids.slice(0, 500) : [] });
+      if (r?.ok && r.prices && typeof r.prices === 'object') prices = r.prices;
+    } catch {}
+    toPage({ type: 'prices', id, ids, prices });
+  }
   // Set envoyé depuis fut.gg : transmis au panneau (au chargement et à chaque nouvel envoi)
   chrome.storage.local.get('albumImport').then(({ albumImport }) => albumImport && toPage({ type: 'import', data: albumImport }));
   chrome.storage.local.onChanged.addListener((c) => c.albumImport?.newValue && toPage({ type: 'import', data: c.albumImport.newValue }));
