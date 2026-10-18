@@ -1026,7 +1026,13 @@
     if (!need.length) return Promise.resolve();
     const id = ++priceSeq;
     return new Promise((resolve) => {
-      const timer = setTimeout(() => (priceWait.delete(id), resolve()), timeout);
+      const timer = setTimeout(() => {
+        // fut.gg muet : pas de nouvel essai pour ces cartes avant 10 min (évite d'attendre à chaque calcul)
+        const retry = Date.now() - PRICE_TTL + 6e5;
+        for (const d of need) priceCache.set(d, [priceCache.get(d)?.[0] ?? 0, retry]);
+        priceWait.delete(id);
+        resolve();
+      }, timeout);
       priceWait.set(id, () => (clearTimeout(timer), resolve()));
       window.postMessage({ ns: NS, dir: 'to-ext', prices: { id, ids: need.slice(0, 500) } }, window.location.origin);
     });
@@ -1054,8 +1060,7 @@
         const at = X.attrsFrom(it) ?? {};
         let name = '';
         try {
-          const sd = it.getStaticData?.();
-          name = sd?.name || [sd?.firstName, sd?.lastName].filter(Boolean).join(' ');
+          name = X.staticName(it, '');
         } catch {}
         s.players[d] = { defId: d, name: String(name || it.name || d).slice(0, 60), rating: at.r || 0, minPrice: priceOf(it), rareflag: at.f, l: at.l || 0, c: at.c || 0, n: at.n || 0, collected: false, kept: true };
       }
@@ -2225,7 +2230,8 @@
   // Vue Galerie poussée sur la navigation courante ; set ouvert (et grade visé) en option
   function open(key, grade) {
     if (!defineViews()) return false;
-    const nav = homeHub?.getNavigationController?.() ?? currentNav();
+    // Onglet affiché d'abord (sinon la vue serait poussée sur l'onglet Accueil masqué)
+    const nav = currentNav() ?? homeHub?.getNavigationController?.();
     if (!nav || typeof nav.pushViewController !== 'function') return false;
     const ctl = new Controller();
     ctl.init();

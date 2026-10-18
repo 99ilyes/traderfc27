@@ -83,6 +83,8 @@
   const resaleFor = (p, market, cfg) => (cfg.afterBuy === 'keep' ? 0 : Math.max(sellFor(p, cfg), roundPrice(Number(market) || 0)));
   const isOpen = (q) => q.status === 'pending' || q.status === 'searching';
   const isUnsold = (b) => b.state === 'expired' || b.state === 'unlisted';
+  // Tâches reprises seules après une pause anti-captcha (la lecture des joueurs de la vue Galerie se relance à la main)
+  const RESUMABLE = new Set(['buy', 'check']);
   const EMPTY_TOTAL = { bought: 0, spent: 0, sold: 0, received: 0, tax: 0, lost: 0, kept: 0, keptSpent: 0 };
   Object.assign(X, { isDone, isFailed, isOpen, isUnsold, tolOf, netOf, step: X.step, galleryResale: resaleFor });
 
@@ -565,7 +567,7 @@
     }
     // Captcha ou limite EA : pause courte commune, reprise automatique de la tâche ensuite
     lockout(msg) {
-      const mode = this.mode;
+      const mode = RESUMABLE.has(this.mode) ? this.mode : null;
       this.stopRequested = true;
       this.wake?.();
       const ms = this.guard.lockPause();
@@ -620,7 +622,7 @@
         const g = [this.guard.check(), bidToo ? this.guard.checkBid() : { ok: true }].find((x) => !x.ok);
         if (!g) return true;
         if (g.locked) {
-          const mode = this.mode;
+          const mode = RESUMABLE.has(this.mode) ? this.mode : null;
           this.stopRequested = true;
           this.log(`${g.reason} : reprise automatique à la fin`);
           if (mode) {
@@ -643,9 +645,11 @@
       const g = this.guard.check();
       if (g.locked) {
         this.mode = null;
-        save(K_LOCK_RESUME, { mode });
-        this.scheduleResume();
-        this.log(`${g.reason} : démarrage automatique à la fin`);
+        if (RESUMABLE.has(mode)) {
+          save(K_LOCK_RESUME, { mode });
+          this.scheduleResume();
+        }
+        this.log(`${g.reason}${RESUMABLE.has(mode) ? ' : démarrage automatique à la fin' : ''}`);
         this.ctx.afterTask();
         return false;
       }

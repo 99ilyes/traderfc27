@@ -6,7 +6,6 @@
   X.SNIPE_NS = 'snipefc27';
   X.ALBUM_NS = 'albumfc27';
   X.APP = 'FC27 Trader';
-  X.VERSION = '1.4.3';
 
   // ---------- Prix EA ----------
 
@@ -370,8 +369,6 @@
   X.bid = (item) => X.observe(services.Item.bid(item.raw, item.buyNow));
   X.toTransfer = (raw) => X.observe(services.Item.move(raw, ItemPile.TRANSFER));
   X.toClub = (raw) => X.observe(services.Item.move(raw, ItemPile.CLUB));
-  // Mise en vente 1 h, enchère de départ un palier sous le prix
-  X.listAt = (raw, price) => X.observe(services.Item.list(raw, priceDown(price), price, 3600));
   // Mise en vente bornée à la fourchette EA de la carte (demandée si absente) ; renvoie le prix retenu
   X.listClamped = async (raw, buyNow) => {
     let sell = buyNow;

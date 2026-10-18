@@ -978,8 +978,9 @@
       } else this.note(`${name} laissé dans les non-assignés (statut ${r.status})`, 'error');
       return r.success;
     }
+    // Mise en vente bornée à la fourchette EA (enchère de départ jamais sous le minimum de la carte)
     async list(raw, name, price) {
-      const r = await X.listAt(raw, price);
+      const r = await X.listClamped(raw, price);
       if (r.success) return true;
       if (X.BAD_STATUS.has(r.status)) this.lockout(`Statut EA ${r.status} (captcha ou limite)`);
       this.note(`Mise en vente de ${name} échouée (statut ${r.status}${r.status === 461 ? ', prix hors fourchette EA' : ''})`, 'error');
