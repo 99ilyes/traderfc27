@@ -69,3 +69,17 @@ function render(st) {
   render(fc27Stats);
   chrome.storage.local.onChanged.addListener((c) => c.fc27Stats?.newValue && render(c.fc27Stats.newValue));
 })();
+
+(async () => {
+  const $ = (id) => document.getElementById(id);
+  const { fc27Login: cfg = {} } = await chrome.storage.local.get('fc27Login');
+  $('login-on').checked = !!cfg.on;
+  $('login-email').value = cfg.email ?? '';
+  $('login-password').value = cfg.password ?? '';
+  $('login-save').onclick = async () => {
+    const next = { on: $('login-on').checked, email: $('login-email').value.trim(), password: $('login-password').value };
+    await chrome.storage.local.set({ fc27Login: next });
+    $('login-save').textContent = next.on && (!next.email || !next.password) ? 'Adresse et mot de passe requis' : 'Enregistré';
+    setTimeout(() => ($('login-save').textContent = 'Enregistrer'), 2e3);
+  };
+})();

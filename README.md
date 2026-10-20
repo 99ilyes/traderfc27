@@ -20,7 +20,7 @@ Extension Chrome unique pour la Web App FC 27 : fusion de SnipeFC27 (0.6.2) et A
 
 Ventes détectées vite : liste de transferts relue toutes les 2 à 4 min pendant le sniping tant que des cartes sont en vente ; liste pleine ou crédits insuffisants : relue toutes les 1 à 2 min et reprise dès qu'une vente libère la place ou les crédits (avant : nouvel essai après 8 à 12 min). Achat direct Galerie en attente de crédits : relecture toutes les minutes.
 
-Fonctionnement continu, toujours actif : le sniper attend au lieu de s'arrêter (crédits insuffisants, liste de transferts pleine, quota anti-ban, cible sans prix rentable), reprend après rechargement de la Web App (session expirée, connexion automatique si la session EA est ouverte), après une tâche Galerie et après une pause. À la reprise, un prix vérifié il y a moins de 5 min est réutilisé (pas de nouveau sondage). Pendant ses pauses : ventes encaissées, non-assignés rangés, snipes invendus remis en vente.
+Fonctionnement continu, toujours actif : le sniper attend au lieu de s'arrêter (crédits insuffisants, liste de transferts pleine, quota anti-ban, cible sans prix rentable), reprend après rechargement de la Web App (session expirée : clic sur le bouton de connexion, puis, si la session EA est close, saisie de l'adresse et du mot de passe enregistrés dans la popup, section « Connexion automatique EA »), après une tâche Galerie et après une pause. À la reprise, un prix vérifié il y a moins de 5 min est réutilisé (pas de nouveau sondage). Pendant ses pauses : ventes encaissées, non-assignés rangés, snipes invendus remis en vente.
 
 Hésitations : 8 % des recherches, +0,5 à 1,5 s (au lieu de +1 à 4 s).
 
@@ -49,6 +49,10 @@ Suivi détaillé du sniper (bouton « Réinitialiser » commun) :
 - **Sessions** : une session couvre le fonctionnement continu du sniper, rechargements de la Web App et tâches Galerie compris ; un arrêt manuel la clôt, plus de 30 min d'interruption en ouvre une nouvelle. Par session : durée, recherches, snipes / ratés, profit réel (rattaché à la session d'achat, même si la vente arrive plus tard), en attente, profit / h ; détail des cibles au survol. 30 dernières sessions conservées. L'onglet Sniper et la popup affichent la session en cours.
 - **Par joueur** : snipes / ratés, ventes, profit réel, profit moyen par vente, délai moyen de vente, cartes en attente ; recherches ciblées, investi et meilleure vente au survol. Tri par profit, snipes ou activité récente, export CSV (presse-papiers).
 - **Par jour** : 14 derniers jours, durée, recherches, snipes, ventes, profit réel.
+
+## Connexion automatique EA
+
+Popup > **Connexion automatique EA** : adresse, mot de passe, case à cocher, « Enregistrer ». Après un 401, la Web App est rechargée et son bouton de connexion cliqué ; si EA renvoie vers `signin.ea.com`, l'adresse puis le mot de passe sont saisis et validés (« se souvenir de moi » coché s'il existe). Uniquement dans les 10 min qui suivent ce clic (pas de saisie sur une visite manuelle de la page EA), 5 validations max en 30 min (environ 2 connexions) puis abandon avec notification. Code de vérification demandé par EA : notification, saisie à la main (cocher « se souvenir de cet appareil » pour l'éviter ensuite). Identifiants stockés en clair dans le stockage local de l'extension. Sélecteurs de la page EA non vérifiés sur le vrai site.
 
 ## Garde-fous (communs à toutes les tâches)
 

@@ -7,6 +7,14 @@
   </head>
   <body>
     <main id="root"></main>
+    <details id="login">
+      <summary>Connexion automatique EA</summary>
+      <label><input type="checkbox" id="login-on" /> Se reconnecter seul après une session expirée</label>
+      <input type="email" id="login-email" placeholder="Adresse e-mail EA" autocomplete="off" />
+      <input type="password" id="login-password" placeholder="Mot de passe EA" autocomplete="new-password" />
+      <button id="login-save">Enregistrer</button>
+      <p class="muted" id="login-note">Stockés en clair dans l'extension, utilisés seulement sur signin.ea.com pendant une reprise. Code de vérification EA : à saisir à la main.</p>
+    </details>
     <script src="./popup.js"></script>
   </body>
 </html>
