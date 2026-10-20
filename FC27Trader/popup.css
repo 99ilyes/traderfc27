@@ -16,3 +16,8 @@ button:hover:not(:disabled) { filter: brightness(1.15); }
 button:disabled { opacity: .4; cursor: default; }
 .go { background: #3ddc84; color: #0b1118; } .stop { background: #c92a2a; color: #fff; }
 .on-btn { background: #00caf6; color: #0b1118; } .ghost { background: #1b1e25; }
+#login { margin: 0 12px 12px; padding: 8px; border-radius: 6px; background: #1b1e25; }
+#login summary { cursor: pointer; font-weight: 600; }
+#login label { display: flex; align-items: center; gap: 6px; font-size: 12px; margin: 6px 0; }
+#login input[type=email], #login input[type=password] { box-sizing: border-box; width: 100%; margin-bottom: 6px; padding: 7px; border: 1px solid #2a2e37; border-radius: 6px; background: #15171c; color: inherit; font: inherit; }
+#login button { width: 100%; margin-bottom: 6px; }

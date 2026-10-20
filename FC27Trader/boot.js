@@ -214,7 +214,7 @@
   }
 
   // Reprise attendue (rechargement après 401, sniper actif, achats en cours) : clic sur le bouton de connexion
-  // de la Web App (session déjà ouverte côté EA ; aucun identifiant n'est saisi)
+  // de la Web App ; session EA close : identifiants de la popup saisis sur la page de connexion EA (login.js)
   const LOGIN_RE = /^\s*(log ?in|se connecter|connexion|ouvrir une session|anmelden|iniciar sesión|accedi)\s*$/i;
   const resumeExpected = () =>
     load(`${X.SNIPE_NS}:on`, false) === true ||
@@ -228,6 +228,7 @@
   const boot = setInterval(() => {
     if (X.webAppReady()) {
       clearInterval(boot);
+      window.postMessage({ ns: NS, dir: 'to-ext', login: 'done' }, window.location.origin);
       try {
         init();
       } catch (err) {
@@ -240,6 +241,7 @@
       if (b) {
         lastClick = Date.now();
         clicks++;
+        window.postMessage({ ns: NS, dir: 'to-ext', login: 'wanted' }, window.location.origin);
         setTimeout(() => b.click(), 2e3 + Math.random() * 3e3);
       }
     }
