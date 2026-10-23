@@ -419,13 +419,18 @@
       throw new LockPause();
     }
     sessionExpired() {
-      const d = rand(6e4, 12e4);
+      this.scheduleReload('Session expirée (401)');
       this.stopRequested = true;
+      throw new Stop();
+    }
+    // Rechargement de la Web App puis reprise (aussi appelé par boot.js si la Web App s'est déconnectée seule)
+    scheduleReload(why, range = [6e4, 12e4]) {
+      if (X.reloading) return;
+      const d = rand(...range);
       X.reloading = true;
-      this.note(`Session expirée (401) : rechargement dans ${Math.round(d / 1e3)} s puis reprise`, 'error');
+      this.note(`${why} : rechargement dans ${Math.round(d / 1e3)} s puis reprise`, 'error');
       save(K_RESUME, { at: Date.now() + d });
       this.reloadTimer = setTimeout(() => location.reload(), d);
-      throw new Stop();
     }
     async blocked(reason, range = BLOCKED_WAIT) {
       const ms = rand(...range);

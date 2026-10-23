@@ -189,6 +189,8 @@
     }
   }
   function onResponse(url, status, body) {
+    // 401 sur l'API EA (Web App ou extension) : session perdue, reprise par boot.js
+    if (status === 401 && /\/ut\/game\//i.test(url)) X.authLostAt = Date.now();
     if (status !== 200) return;
     const text = typeof body === 'string' ? body : null;
     let j = typeof body === 'object' && body ? body : null;

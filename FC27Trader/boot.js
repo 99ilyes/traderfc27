@@ -75,7 +75,7 @@
         if (!this.live()) this.setConfig({ activeFilter: n });
       },
       patchTarget(id, patch) {
-        if (this.live()) return;
+        if (this.live() && sniper.filter?.id === id) return;
         this.editTargets((list) => {
           const f = list.find((x) => x.id === id);
           if (f) Object.assign(f, patch);
@@ -211,11 +211,30 @@
     };
     pendingCmds.splice(0).forEach(onCommand);
     onUpdate();
+
+    // Session perdue sans 401 vu par le sniper (Web App revenue seule à son écran de connexion, 401 sur ses propres
+    // appels, sniper en pause) : rechargement puis reprise, au lieu de rester bloqué sur l'écran de connexion
+    let lost = 0;
+    setInterval(() => {
+      if (X.reloading) return;
+      lost = X.authLostAt || !X.webAppReady() || loginButton() ? lost + 1 : 0;
+      if (lost < 3) return;
+      lost = 0;
+      X.authLostAt = 0;
+      const why = 'Web App déconnectée';
+      if (album.running) album.sessionExpired();
+      else if (sniper.on || sniper.running) {
+        sniper.scheduleReload(why, [1e4, 3e4]);
+        sniper.stop(why, false);
+      }
+    }, 5e3);
   }
 
   // Reprise attendue (rechargement après 401, sniper actif, achats en cours) : clic sur le bouton de connexion
   // de la Web App ; session EA close : identifiants de la popup saisis sur la page de connexion EA (login.js)
   const LOGIN_RE = /^\s*(log ?in|se connecter|connexion|ouvrir une session|anmelden|iniciar sesión|accedi)\s*$/i;
+  const loginButton = () =>
+    [...document.querySelectorAll('button, a.btn-standard, .btn-standard')].find((x) => LOGIN_RE.test(x.textContent ?? '') && x.offsetParent !== null && !x.disabled && !x.closest('#afc-root'));
   const resumeExpected = () =>
     load(`${X.SNIPE_NS}:on`, false) === true ||
     !!load(X.SNIPE_RESUME_KEY ?? `${X.SNIPE_NS}:resume`, null) ||
@@ -237,7 +256,7 @@
       return;
     }
     if (clicks < 3 && Date.now() - bootAt > 4e3 && Date.now() - bootAt < 3e5 && Date.now() - lastClick > 15e3 && resumeExpected()) {
-      const b = [...document.querySelectorAll('button, a.btn-standard, .btn-standard')].find((x) => LOGIN_RE.test(x.textContent ?? '') && x.offsetParent !== null && !x.disabled);
+      const b = loginButton();
       if (b) {
         lastClick = Date.now();
         clicks++;

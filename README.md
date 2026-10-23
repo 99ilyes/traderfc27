@@ -14,13 +14,13 @@ Extension Chrome unique pour la Web App FC 27 : fusion de SnipeFC27 (0.6.2) et A
 
 ## Sniper (moteur SnipeFC27)
 
-1. Onglet Sniper > **Cibles** : chercher un joueur ou « + Filtre de la Web App ».
+1. Onglet Sniper > **Cibles** : chercher un joueur ou « + Filtre de la Web App ». Clic sur une cible : ses prix s'affichent dans « Prix de la cible » (aperçu, modifiable sauf la cible en cours de sniping) ; sniper arrêté, elle devient aussi la cible de départ.
 2. **Lancer le sniper**. Prix automatiques : achat un palier sous la moins chère du marché, baissé jusqu'au profit visé (2 % du prix, 150 minimum, ou profit min réglé), revente 1 h jamais sous le prix d'achat taxe comprise.
 3. **Alterner les cibles** (remplace le mode nuit) : change de cible après un nombre de recherches réglable (Court 50-100, Moyen 150-300, Normal 450-900 par défaut, Long 900-1 800), tiré au hasard dans la fourchette.
 
 Ventes détectées vite : liste de transferts relue toutes les 2 à 4 min pendant le sniping tant que des cartes sont en vente ; liste pleine ou crédits insuffisants : relue toutes les 1 à 2 min et reprise dès qu'une vente libère la place ou les crédits (avant : nouvel essai après 8 à 12 min). Achat direct Galerie en attente de crédits : relecture toutes les minutes.
 
-Fonctionnement continu, toujours actif : le sniper attend au lieu de s'arrêter (crédits insuffisants, liste de transferts pleine, quota anti-ban, cible sans prix rentable), reprend après rechargement de la Web App (session expirée : clic sur le bouton de connexion, puis, si la session EA est close, saisie de l'adresse et du mot de passe enregistrés dans la popup, section « Connexion automatique EA »), après une tâche Galerie et après une pause. À la reprise, un prix vérifié il y a moins de 5 min est réutilisé (pas de nouveau sondage). Pendant ses pauses : ventes encaissées, non-assignés rangés, snipes invendus remis en vente.
+Fonctionnement continu, toujours actif : le sniper attend au lieu de s'arrêter (crédits insuffisants, liste de transferts pleine, quota anti-ban, cible sans prix rentable), reprend après rechargement de la Web App (session expirée, détectée par un 401 sur n'importe quel appel EA, Web App compris, ou par la Web App revenue seule à son écran de connexion pendant 15 s : rechargement 10 à 30 s plus tard ; clic sur le bouton de connexion, puis, si la session EA est close, saisie de l'adresse et du mot de passe enregistrés dans la popup, section « Connexion automatique EA »), après une tâche Galerie et après une pause. À la reprise, un prix vérifié il y a moins de 5 min est réutilisé (pas de nouveau sondage). Pendant ses pauses : ventes encaissées, non-assignés rangés, snipes invendus remis en vente.
 
 Hésitations : 8 % des recherches, +0,5 à 1,5 s (au lieu de +1 à 4 s).
 

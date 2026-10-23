@@ -491,6 +491,7 @@
       if (intent.mode === 'buy' && this.queue.some(isOpen)) await this.runQueue();
     }
     sessionExpired() {
+      if (X.reloading) return void this.stop('Session expirée (401)');
       const d = rand(6e4, 12e4);
       const mode = this.mode;
       X.reloading = true;

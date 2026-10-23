@@ -229,7 +229,7 @@
 #afc-root .t-list { display: flex; flex-direction: column; gap: 4px; max-height: 330px; overflow-y: auto; scrollbar-width: thin; }
 #afc-root .t-row { display: grid; grid-template-columns: auto minmax(0, 1fr) auto; align-items: center; gap: 2px 10px; padding: 7px 9px; border-radius: 7px; background: var(--panel2); border: 1px solid transparent; cursor: pointer; }
 #afc-root .t-row.active { border-color: var(--ac); background: rgba(0,202,246,.07); }
-#afc-root .t-row.lock { cursor: default; }
+#afc-root .t-row.view { border-color: rgba(255,255,255,.35); }
 #afc-root .t-row .t-n { color: #fff; font-weight: 600; font-size: .8rem; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 #afc-root .t-row .t-p { grid-column: 2; font-size: .7rem; color: var(--dim); }
 #afc-root .t-row .a-x { grid-row: 1 / span 2; grid-column: 3; }
@@ -688,6 +688,9 @@
       const snipe = this.app.live();
       const list = this.app.targets();
       const activeIdx = snipe ? s.idx : cfg.activeFilter;
+      // Cible affichée (clic) : aperçu de ses prix, même pendant le sniping
+      const viewIdx = Math.max(0, list.findIndex((x) => x.id === this.viewId));
+      const shown = list.some((x) => x.id === this.viewId) ? viewIdx : activeIdx;
       // Cibles
       this.tList.replaceChildren(
         ...(list.length
@@ -696,31 +699,36 @@
               const price = f.buyPrice ? `achat ≤ ${fmt(f.buyPrice)}${f.sellPrice ? ` · vente ${fmt(f.sellPrice)}` : ''}` : f.auto ? 'prix calculés au lancement' : 'prix à renseigner';
               const row = h(
                 'div',
-                { className: `t-row${on ? ' active' : ''}${snipe ? ' lock' : ''}`, title: snipe ? 'Cible choisie par le sniper (alternance si activée)' : 'Cible de départ' },
+                { className: `t-row${on ? ' active' : ''}${i === shown && !on ? ' view' : ''}`, title: snipe ? (on ? 'Cible en cours du sniper' : 'Voir ses prix (cible choisie par le sniper, alternance si activée)') : 'Cible de départ' },
                 h('span', { className: 'a-radio' }),
                 h('span', { className: 'a-row', style: 'gap:6px;min-width:0;flex-wrap:nowrap' }, h('span', { className: 't-n', textContent: f.label }), f.album ? h('span', { className: 'a-pill ac', textContent: 'Galerie' }) : null),
                 h('button', { type: 'button', className: 'a-x', textContent: '×', title: snipe && on ? 'Cible en cours' : 'Retirer', disabled: snipe && on, onclick: (ev) => (ev.stopPropagation(), this.app.removeTarget(f.id)) }),
                 h('span', { className: 't-p', textContent: price }),
               );
-              if (!snipe) row.onclick = () => this.app.setActiveTarget(i);
+              row.onclick = () => {
+                this.viewId = f.id;
+                if (!snipe) this.app.setActiveTarget(i);
+                this.renderSnipe();
+              };
               return row;
             })
           : [h('div', { className: 'a-empty', textContent: 'Aucune cible. Cherche un joueur ou copie le filtre de la Web App.' })]),
       );
       this.tClear.style.display = list.some((f) => f.album) ? '' : 'none';
       this.tClear.disabled = snipe;
-      // Prix de la cible active
-      const f = list[activeIdx];
-      const ptitle = h('div', { className: 'a-row' }, h('span', { className: 'a-block-title a-grow', textContent: 'Prix de la cible' }));
+      // Prix de la cible affichée ; celle en cours de sniping n'est pas modifiable
+      const f = list[shown];
+      const busy = snipe && shown === activeIdx;
+      const ptitle = h('div', { className: 'a-row' }, h('span', { className: 'a-block-title a-grow', textContent: snipe && f && !busy ? 'Prix de la cible (aperçu)' : 'Prix de la cible' }));
       if (!f) this.pricesEl.replaceChildren(ptitle, hint('Choisis une cible.'));
       else {
-        ptitle.append(h('span', { className: 'a-block-hint', textContent: 'Automatique' }), toggle(!!f.auto, (v) => this.app.patchTarget(f.id, { auto: v }), snipe));
+        ptitle.append(h('span', { className: 'a-block-hint', textContent: 'Automatique' }), toggle(!!f.auto, (v) => this.app.patchTarget(f.id, { auto: v }), busy));
         const gain = f.buyPrice && f.sellPrice ? profitOf(f.buyPrice, f.sellPrice) : null;
         const line = h('div', { style: 'font-size:.82rem;color:#fff', textContent: f.buyPrice ? `Achat ≤ ${fmt(f.buyPrice)} · Vente ${fmt(f.sellPrice)}${gain === null ? '' : ` · Profit ${fmt(gain)}`}` : 'Prix calculés au lancement' });
         if (f.auto) this.pricesEl.replaceChildren(ptitle, line, hint(`Achat un palier sous la moins chère du marché, baissé jusqu’au profit visé (${cfg.minProfit > 0 ? `${fmt(cfg.minProfit)} min` : '2 % du prix, 150 min'}). Prix revérifiés ${cfg.recheckEvery > 0 ? `toutes les ${cfg.recheckEvery} recherches, ` : ''}toutes les 15 min et après chaque snipe.`));
         else {
           const num = (k) => {
-            const i = h('input', { type: 'number', className: 'a-in', min: '0', step: '50', value: String(f[k] || ''), disabled: snipe });
+            const i = h('input', { type: 'number', className: 'a-in', min: '0', step: '50', value: String(f[k] || ''), disabled: busy });
             i.onchange = () => this.app.patchTarget(f.id, { [k]: Math.max(0, Math.floor(Number(i.value) || 0)) });
             return i;
           };
@@ -1556,7 +1564,7 @@
       this.renderStrip();
       const a = this.album;
       const s = this.sniper;
-      const sig = `${a.mode}|${a.version}|${s.running}|${s.task}|${s.idx}|${this.cfg.snipeFilters}|${this.cfg.rotate}|${this.cfg.rotateEvery}`;
+      const sig = `${a.mode}|${a.version}|${s.running}|${s.task}|${s.idx}|${this.cfg.snipeFilters}|${this.cfg.activeFilter}|${this.cfg.rotate}|${this.cfg.rotateEvery}`;
       if (sig !== this.lastSig && !this.typing()) {
         this.lastSig = sig;
         if (this.tab === 'gallery' || this.tab === 'snipe') this.renderBody();
